@@ -1,7 +1,7 @@
 import torch
 
 
-class MockCopySequence:
+class MockCopySequence(torch.nn.Module):
     """
     A mock hardcoded model to imitate a transformer for copy-sequence.
     Used for testing the translation generation with beam search, greedy decoding, etc.
@@ -12,6 +12,7 @@ class MockCopySequence:
     eos_token = 10
 
     def __init__(self) -> None:
+        super().__init__()
         self.weights = torch.tensor([
             [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
             [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
@@ -26,17 +27,16 @@ class MockCopySequence:
             [0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1]
         ])
 
-        self.emb_matrix = torch.eye(11)
+        self.__emb_matrix = torch.eye(11)
 
-    def embedding(self, x: 'torch.LongTensor') -> 'torch.Tensor':
+    def __embedding(self, x: 'torch.LongTensor') -> 'torch.Tensor':
         return torch.cat(
-            [torch.index_select(self.emb_matrix, dim=0, index=x[i, ...]).unsqueeze(0) for i in range(x.shape[0])],
+            [torch.index_select(self.__emb_matrix,
+                                dim=0,
+                                index=x[i, ...]).unsqueeze(0) for i in range(x.shape[0])],
             dim=0
         )
 
     def forward(self, src: 'torch.LongTensor', tgt: 'torch.LongTensor') -> 'torch.Tensor':
         _, decoded_length = tgt.shape
-        return (self.embedding(src) @ self.weights)[:, 1:decoded_length + 1, :]
-
-    def __call__(self, *args, **kwargs):
-        return self.forward(*args, **kwargs)
+        return (self.__embedding(src) @ self.weights)[:, 1:decoded_length + 1, :]
