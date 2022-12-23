@@ -99,9 +99,9 @@ BEAM_SEARCH_CASES = [
         max_len=10,
         beam_size=1,
         src=torch.tensor([[1, 2, 3, 4, 10],
-                          [1, 2, 3, 4, 10]]).long(),
+                          [1, 5, 2, 4, 10]]).long(),
         tgt=torch.tensor([[[1, 2, 3, 4, 10]],
-                          [[1, 2, 3, 4, 10]]]).long()
+                          [[1, 5, 2, 4, 10]]]).long()
     ),
     BeamSearchCase(
         max_len=10,
