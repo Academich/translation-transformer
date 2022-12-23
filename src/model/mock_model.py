@@ -3,14 +3,15 @@ import torch
 
 class MockCopySequence:
     """
-    A mock hardcoded model to imitate a transformer for copy-sequence
+    A mock hardcoded model to imitate a transformer for copy-sequence.
+    Used for testing the translation generation with beam search, greedy decoding, etc.
+    Works with token indices from 0 to 10.
     """
+    pad_token = 0
+    bos_token = 1
+    eos_token = 10
 
-    def __init__(self):
-        self.pad_token = 0
-        self.bos_token = 1
-        self.eos_token = 10
-
+    def __init__(self) -> None:
         self.weights = torch.tensor([
             [1, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
             [0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 0],
