@@ -151,13 +151,6 @@ BEAM_SEARCH_CASES = [
     BeamSearchCase(
         max_len=10,
         beam_size=2,
-        src=torch.tensor([[1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 10]]).long(),
-        tgt=torch.tensor([[[1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2],
-                           [1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2]]]).long()
-    ),
-    BeamSearchCase(
-        max_len=10,
-        beam_size=2,
         src=torch.tensor([[1, 9, 9, 10]]).long(),
         tgt=torch.tensor([[[1, 10, 0, 0],
                            [1, 9, 9, 10]]]).long()
@@ -168,6 +161,26 @@ BEAM_SEARCH_CASES = [
         src=torch.tensor([[1, 8, 9, 10]]).long(),
         tgt=torch.tensor([[[1, 8, 9, 10],
                            [1, 8, 10, 0]]]).long()
+    ),
+    BeamSearchCase(
+        max_len=10,
+        beam_size=3,
+        src=torch.tensor([[1, 2, 8, 9, 10]]).long(),
+        tgt=torch.tensor([[[1, 2, 8, 9, 10],
+                           [1, 3, 8, 9, 10],
+                           [1, 2, 8, 10, 0]]]).long()
+    ),
+    BeamSearchCase(
+        max_len=10,
+        beam_size=3,
+        src=torch.tensor([[1, 2, 8, 9, 10],
+                          [1, 2, 8, 9, 10]]).long(),
+        tgt=torch.tensor([[[1, 2, 8, 9, 10],
+                           [1, 3, 8, 9, 10],
+                           [1, 2, 8, 10, 0]],
+                          [[1, 2, 8, 9, 10],
+                           [1, 3, 8, 9, 10],
+                           [1, 2, 8, 10, 0]]]).long()
     )
 ]
 
