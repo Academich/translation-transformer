@@ -3,7 +3,7 @@ from dataclasses import dataclass
 import torch
 import pytest
 
-from src.model.mock_model import MockCopySequence
+from tests.mock_model import MockCopySequence
 from src.translation.translators import TranslationInferenceGreedy
 from src.translation.translators import TranslationInferenceBeamSearch
 
