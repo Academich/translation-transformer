@@ -5,25 +5,26 @@ from torch import nn
 from torch.nn.functional import one_hot
 
 
-# class TokenEmbedding(nn.Module):
-#     def __init__(self, vocab_size: int, emb_size: int, paddind_idx):
-#         super().__init__()
-#         self.embedding = nn.Embedding(vocab_size, emb_size, padding_idx=paddind_idx)
-#         self.emb_size = emb_size
-#
-#     def forward(self, tokens):
-#         return self.embedding(tokens.long()) * math.sqrt(self.emb_size)
-
 class TokenEmbedding(nn.Module):
-    def __init__(self, vocab_size: int, emb_size: int):
-        super(TokenEmbedding, self).__init__()
-        self.vocab_size = vocab_size
-        self.embedding = nn.Linear(vocab_size, emb_size, bias=False)
+    def __init__(self, vocab_size: int, emb_size: int, padding_idx=0):
+        super().__init__()
+        self.embedding = nn.Embedding(vocab_size, emb_size, padding_idx=padding_idx)
+        self.emb_size = emb_size
 
     def forward(self, tokens):
-        return self.embedding(
-            one_hot(tokens, num_classes=self.vocab_size).float()
-        )
+        return self.embedding(tokens)
+
+
+# class ManualTokenEmbedding(nn.Module):
+#     def __init__(self, vocab_size: int, emb_size: int):
+#         super(ManualTokenEmbedding, self).__init__()
+#         self.vocab_size = vocab_size
+#         self.embedding = nn.Linear(vocab_size, emb_size, bias=False)
+#
+#     def forward(self, tokens):
+#         return self.embedding(
+#             one_hot(tokens, num_classes=self.vocab_size).float()
+#         )
 
 
 class PositionalEncoding(nn.Module):
