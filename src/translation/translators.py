@@ -41,7 +41,8 @@ class TranslationInferenceGreedy:
                                  pred_token == self.pad_token)).sum().item() == b_size:
                 break
 
-        return generated_tokens
+        # Unified output format with TranslationInferenceBeamSearch
+        return [i for i in generated_tokens.unsqueeze(1)]
 
 
 class TranslationInferenceBeamSearch:
@@ -116,11 +117,11 @@ class TranslationInferenceBeamSearch:
             generated_tokens = torch.index_select(generated_tokens, dim=0, index=order)
             results.append(generated_tokens)
 
-        return torch.cat([i.unsqueeze(0) for i in results], dim=0)
+        return results
 
 
 if __name__ == '__main__':
-    from src.model.mock_model import MockCopySequence
+    from tests.mock_model import MockCopySequence
 
     tr = TranslationInferenceBeamSearch(model=MockCopySequence(),
                                         max_len=10,
@@ -128,5 +129,6 @@ if __name__ == '__main__':
                                         pad_token=MockCopySequence.pad_token,
                                         bos_token=MockCopySequence.bos_token,
                                         eos_token=MockCopySequence.eos_token)
-    src = torch.tensor([[1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 10]]).long()
+    src = torch.tensor([[1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 10],
+                        [1, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 2, 10]]).long()
     print(tr.generate(src))
