@@ -72,14 +72,13 @@ assert src_vocab.bos_token_idx == tgt_vocab.bos_token_idx
 
 # === Callbacks ===
 ckpt_name = args.checkpoint_name + '_{epoch}-{step}' if args.checkpoint_name is not None else '{epoch}-{step}'
-lr_log_callback = callbacks.LearningRateMonitor(logging_interval="step")
 checkpoint_callback = callbacks.ModelCheckpoint(dirpath=args.save_dir_path,
                                                 filename=ckpt_name,
                                                 verbose=True,
                                                 save_last=True)
 progress_bar_callback = callbacks.progress.TQDMProgressBar(refresh_rate=args.progress_bar_refresh_rate)
 del args.progress_bar_refresh_rate
-cb_list = [checkpoint_callback, progress_bar_callback, lr_log_callback]
+cb_list = [checkpoint_callback, progress_bar_callback]
 
 # === Instantiate classes ===
 trainer = pl.Trainer.from_argparse_args(args,

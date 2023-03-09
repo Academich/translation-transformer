@@ -24,7 +24,6 @@ class TextTranslationTransformer(pl.LightningModule):
 
     def __init__(self,
                  learning_rate: 'float',
-                 warmup: 'int',
                  beta1: 'float',
                  beta2: 'float',
                  weight_decay: 'float',
@@ -184,30 +183,11 @@ class TextTranslationTransformer(pl.LightningModule):
 
     # === Optimization ===
     def configure_optimizers(self):
-        lr = self.hparams.learning_rate
         optimizer = optim.AdamW(self.parameters(),
-                                lr=lr,
+                                lr=self.hparams.learning_rate,
                                 betas=(self.hparams.beta1, self.hparams.beta2),
                                 weight_decay=self.hparams.weight_decay)
-
-        if self.hparams.warmup == 0:
-            return optimizer
-
-        def noam_update(step: int) -> float:
-            if step < 1:
-                return 0
-            return lr * self.hparams.embedding_dim ** (-0.5) * min(step ** (-0.5), step * self.hparams.warmup ** (-1.5))
-
-        # TODO Make sure last step/epoch is loaded correctly after we resume training from a checkpoint
-        scheduler = optim.lr_scheduler.LambdaLR(optimizer,
-                                                lr_lambda=noam_update
-                                                )
-        scheduler = {
-            "scheduler": scheduler,
-            "interval": "step",
-            "frequency": 1
-        }
-        return [optimizer], [scheduler]
+        return optimizer
 
     # === Argparse-related methods ===
     @classmethod
@@ -216,8 +196,6 @@ class TextTranslationTransformer(pl.LightningModule):
         # Model
         parser.add_argument("--learning_rate", type=float, default=0.0004,
                             help="Constant learning rate for the AdamW optimizer.")
-        parser.add_argument("--warmup", type=int, default=0,
-                            help="Number of warmup steps for lr schedule.")
         parser.add_argument("--beta1", type=float, default=0.9,
                             help="Beta 1 for the AdamW optimizer")
         parser.add_argument("--beta2", type=float, default=0.999,
