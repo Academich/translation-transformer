@@ -1,20 +1,23 @@
 from typing import List, Tuple, Optional, Mapping, Union
 from multiprocessing import cpu_count
+from pathlib import Path
 
 import torch
 from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils.rnn import pad_sequence
 
-import pytorch_lightning as pl
+from pytorch_lightning import LightningDataModule
+
+from src.tasks.copy_sequence import CopySequenceGenerator
 
 
 class TokenVocabulary:
 
     def __init__(self,
-                 vocab: 'Mapping[Union[int, str], str]',
-                 bos_token_idx: 'int' = 1,
-                 eos_token_idx: 'int' = 2,
-                 pad_token_idx: 'int' = 0):
+                 vocab: Mapping[Union[int, str], str],
+                 bos_token_idx: int = 1,
+                 eos_token_idx: int = 2,
+                 pad_token_idx: int = 0):
         self.vocab = {int(k): v for k, v in vocab.items()}
         self.bos_token_idx = bos_token_idx
         self.eos_token_idx = eos_token_idx
@@ -22,7 +25,7 @@ class TokenVocabulary:
         self.service_tokens = (bos_token_idx, eos_token_idx, pad_token_idx)
         self.n_tokens = len(self.vocab)
 
-    def decode(self, tokens: 'torch.LongTensor'):
+    def decode(self, tokens: torch.LongTensor):
         decoded_chars = []
         for i in tokens.numpy():
             if i == self.eos_token_idx:
@@ -36,7 +39,7 @@ class TokenVocabulary:
 
 class Seq2SeqDataset(Dataset):
 
-    def __init__(self, src_path: 'str', tgt_path: 'str'):
+    def __init__(self, src_path: Union[Path, str], tgt_path: Union[Path, str]):
         with open(src_path, "rb") as f, open(tgt_path, "rb") as g:
             self.domain = torch.load(f)
             self.target = torch.load(g)
@@ -50,43 +53,67 @@ class Seq2SeqDataset(Dataset):
         return src_tokens, tgt_tokens
 
 
-class Seq2SeqDM(pl.LightningDataModule):
-
+class CopySequence(LightningDataModule):
     def __init__(self,
-                 train_src_path: Optional[str] = None,
-                 train_tgt_path: Optional[str] = None,
-                 val_src_path: Optional[str] = None,
-                 val_tgt_path: Optional[str] = None,
-                 test_src_path: Optional[str] = None,
-                 test_tgt_path: Optional[str] = None,
+                 data_dir: str = None,
                  batch_size: int = 1,
                  num_workers: int = cpu_count(),
                  shuffle_train: bool = False,
-                 padding_idx: int = 0):
+                 pad_idx: int = 0,
+                 train_size: int = 40_000,
+                 train_min_len: int = 1,
+                 train_max_len: int = 20,
+                 val_size: int = 100,
+                 val_min_len: int = 1,
+                 val_max_len: int = 20,
+                 test_size: int = 1000,
+                 test_min_len: int = 1,
+                 test_max_len: int = 20):
         super().__init__()
-        self.train_src_path = train_src_path
-        self.val_src_path = val_src_path
-        self.test_src_path = test_src_path
 
-        self.train_tgt_path = train_tgt_path
-        self.val_tgt_path = val_tgt_path
-        self.test_tgt_path = test_tgt_path
-
+        if data_dir is None:
+            self.data_dir = Path("data").resolve() / "copy_sequence"
+        else:
+            self.data_dir = Path(data_dir).resolve()
         self.batch_size = batch_size
         self.shuffle_train = shuffle_train
         self.num_workers = num_workers
-        self.padding_idx = padding_idx
+        self.pad_idx = pad_idx
+
+        self.train_size = train_size
+        self.train_min_len, self.train_max_len = train_min_len, train_max_len
+        self.val_size = val_size
+        self.val_min_len, self.val_max_len = val_min_len, val_max_len
+        self.test_size = test_size
+        self.test_min_len, self.test_max_len = test_min_len, test_max_len
+
+        self.data_gen = CopySequenceGenerator(self.data_dir,
+                                              self.train_size, self.train_min_len, self.train_max_len,
+                                              self.val_size, self.val_min_len, self.val_max_len,
+                                              self.test_size, self.test_min_len, self.test_max_len)
+
+    def prepare_data(self) -> None:
+        """
+        Generate and tokenize data for the copy-sequence task
+        """
+        self.data_gen.generate()
 
     def setup(self, stage: 'Optional[str]' = None) -> None:
+        train_src_path = self.data_dir / "src-train-tokens.pt"
+        train_tgt_path = self.data_dir / "tgt-train-tokens.pt"
+        val_src_path = self.data_dir / "src-val-tokens.pt"
+        val_tgt_path = self.data_dir / "tgt-val-tokens.pt"
+        test_src_path = self.data_dir / "src-test-tokens.pt"
+        test_tgt_path = self.data_dir / "tgt-test-tokens.pt"
         if stage == "fit" or stage is None:
-            self.train = Seq2SeqDataset(self.train_src_path, self.train_tgt_path)
-            self.val = Seq2SeqDataset(self.val_src_path, self.val_tgt_path)
+            self.train = Seq2SeqDataset(train_src_path, train_tgt_path)
+            self.val = Seq2SeqDataset(val_src_path, val_tgt_path)
 
         if stage == "validate":
-            self.val = Seq2SeqDataset(self.val_src_path, self.val_tgt_path)
+            self.val = Seq2SeqDataset(val_src_path, val_tgt_path)
 
         if stage in ("test", "predict") or stage is None:
-            self.test = Seq2SeqDataset(self.test_src_path, self.test_tgt_path)
+            self.test = Seq2SeqDataset(test_src_path, test_tgt_path)
 
     def collate_fn(self, batch: 'List[Tuple[torch.LongTensor, torch.LongTensor]]'
                    ) -> 'Tuple[torch.LongTensor, torch.LongTensor]':
@@ -94,8 +121,8 @@ class Seq2SeqDM(pl.LightningDataModule):
         for src_sample, tgt_sample in batch:
             src_batch.append(src_sample)
             tgt_batch.append(tgt_sample)
-        src_batch = pad_sequence(src_batch, padding_value=self.padding_idx, batch_first=True)
-        tgt_batch = pad_sequence(tgt_batch, padding_value=self.padding_idx, batch_first=True)
+        src_batch = pad_sequence(src_batch, padding_value=self.pad_idx, batch_first=True)
+        tgt_batch = pad_sequence(tgt_batch, padding_value=self.pad_idx, batch_first=True)
         return src_batch.long(), tgt_batch.long()
 
     def train_dataloader(self):
