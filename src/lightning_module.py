@@ -23,9 +23,12 @@ class TextTranslationTransformer(LightningModule):
                  **kwargs):
         super().__init__()
         self.save_hyperparameters()  # The hyperparameters are saved to the “hyper_parameters” key in the checkpoint
+
+    def setup(self, stage: str) -> None:
+        # Creating the model here instead of in __init__ to allow
+        # the data module to execute .prepare_data first
         self._load_vocabularies()
-        self._create_model(*args, **kwargs)
-        self.criterion = nn.CrossEntropyLoss(reduction="mean")
+        self._create_model(**self.hparams)
 
     def _load_vocabularies(self):
         with open(self.hparams.src_vocab_path) as fs, open(self.hparams.tgt_vocab_path) as ft:
@@ -38,6 +41,7 @@ class TextTranslationTransformer(LightningModule):
         self.model.tgt_vocab_len = self.tgt_vocab.n_tokens
         self.model.pad_token_idx = self.src_vocab.pad_token_idx
         self.model.create()
+        self.criterion = nn.CrossEntropyLoss(reduction="mean")
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
         return self.model(*args, **kwargs)

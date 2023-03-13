@@ -40,7 +40,7 @@ class FlexibleCLI(LightningCLI):
     def before_instantiate_classes(self) -> None:
         self.model_class.module_class = model_catalogue[self.config.model_name]
 
-# TODO: Doesn't work if the data is not already prepared by the LightningDataModule
+
 if __name__ == '__main__':
     model_class = TextTranslationTransformer
     cli = FlexibleCLI(
