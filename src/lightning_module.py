@@ -9,6 +9,7 @@ from pytorch_lightning import LightningModule
 from pytorch_lightning.utilities.types import STEP_OUTPUT
 
 from src.wrappers import TokenVocabulary
+from src.translation.translators import TranslationInferenceBeamSearch, TranslationInferenceGreedy
 
 
 class TextTranslationTransformer(LightningModule):
@@ -19,6 +20,9 @@ class TextTranslationTransformer(LightningModule):
                  tgt_vocab_path: str,
                  learning_rate: float = 3e-4,
                  warmup_steps: int = 200,
+                 generation: str = "beam_search",
+                 beam_size: int = 1,
+                 max_len: int = 100,
                  *args,
                  **kwargs):
         super().__init__()
@@ -29,6 +33,7 @@ class TextTranslationTransformer(LightningModule):
         # the data module to execute .prepare_data first
         self._load_vocabularies()
         self._create_model(**self.hparams)
+        self._create_generator()
 
     def _load_vocabularies(self):
         with open(self.hparams.src_vocab_path) as fs, open(self.hparams.tgt_vocab_path) as ft:
@@ -42,6 +47,14 @@ class TextTranslationTransformer(LightningModule):
         self.model.pad_token_idx = self.src_vocab.pad_token_idx
         self.model.create()
         self.criterion = nn.CrossEntropyLoss(reduction="mean")
+
+    def _create_generator(self):
+        self.generator = TranslationInferenceGreedy(self.model,
+                                                    # self.hparams.beam_size,
+                                                    self.hparams.max_len,
+                                                    self.tgt_vocab.pad_token_idx,
+                                                    self.tgt_vocab.bos_token_idx,
+                                                    self.tgt_vocab.eos_token_idx)
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
         return self.model(*args, **kwargs)
@@ -140,7 +153,14 @@ class TextTranslationTransformer(LightningModule):
         return {"source_token_ids": source, "pred_logits": pred_logits, "target_token_ids": target}
 
     def predict_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> Any:
-        pass
+        source, target = batch
+        target = target.cpu()
+        generated = self.generator.generate(source)
+        b_size = target.size()[0]
+        for i in range(b_size):
+            target_str = self.tgt_vocab.decode(target[i])
+            generated_options = self.tgt_vocab.decode_batch(generated[i].cpu())
+            return target_str, ",".join(generated_options)
 
     def configure_optimizers(self):
         d = self.model.emb_dim

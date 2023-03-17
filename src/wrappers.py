@@ -36,6 +36,9 @@ class TokenVocabulary:
         decoded_string = "".join(decoded_chars)
         return decoded_string
 
+    def decode_batch(self, tokens: torch.LongTensor):
+        return [self.decode(tokens[i]) for i in range(tokens.size()[0])]
+
 
 class Seq2SeqDataset(Dataset):
 
