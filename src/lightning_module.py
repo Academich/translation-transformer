@@ -153,14 +153,11 @@ class TextTranslationTransformer(LightningModule):
         return {"source_token_ids": source, "pred_logits": pred_logits, "target_token_ids": target}
 
     def predict_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> Any:
-        source, target = batch
-        target = target.cpu()
+        source, _ = batch
         generated = self.generator.generate(source)
-        b_size = target.size()[0]
-        for i in range(b_size):
-            target_str = self.tgt_vocab.decode(target[i])
-            generated_options = self.tgt_vocab.decode_batch(generated[i].cpu())
-            return target_str, ",".join(generated_options)
+        for p in generated:
+            generated_options = self.tgt_vocab.decode_batch(p.cpu())
+            return ",".join(generated_options)
 
     def configure_optimizers(self):
         d = self.model.emb_dim

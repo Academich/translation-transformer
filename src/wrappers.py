@@ -42,10 +42,15 @@ class TokenVocabulary:
 
 class Seq2SeqDataset(Dataset):
 
-    def __init__(self, src_path: Union[Path, str], tgt_path: Union[Path, str]):
-        with open(src_path, "rb") as f, open(tgt_path, "rb") as g:
+    def __init__(self, src_path: Union[Path, str], tgt_path: Optional[Union[Path, str]] = None):
+        with open(src_path, "rb") as f:
             self.domain = torch.load(f)
-            self.target = torch.load(g)
+            self.target = None
+        if tgt_path is not None:
+            with open(tgt_path, "rb") as g:
+                self.target = torch.load(g)
+        else:
+            self.target = self.domain
 
     def __len__(self):
         return len(self.domain)
@@ -115,8 +120,11 @@ class CopySequence(LightningDataModule):
         if stage == "validate":
             self.val = Seq2SeqDataset(val_src_path, val_tgt_path)
 
-        if stage in ("test", "predict") or stage is None:
+        if stage == "test" or stage is None:
             self.test = Seq2SeqDataset(test_src_path, test_tgt_path)
+
+        if stage == "predict" or stage is None:
+            self.prd = Seq2SeqDataset(test_src_path)
 
     def collate_fn(self, batch: 'List[Tuple[torch.LongTensor, torch.LongTensor]]'
                    ) -> 'Tuple[torch.LongTensor, torch.LongTensor]':
@@ -150,7 +158,7 @@ class CopySequence(LightningDataModule):
                           shuffle=False)
 
     def predict_dataloader(self):
-        return DataLoader(self.test,
+        return DataLoader(self.prd,
                           batch_size=self.batch_size,
                           num_workers=self.num_workers,
                           collate_fn=self.collate_fn,
