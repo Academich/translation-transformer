@@ -46,7 +46,8 @@ if __name__ == '__main__':
     cli = FlexibleCLI(
         model_class=TextTranslationTransformer,
         datamodule_class=CopySequence,
-        run=False
+        run=False,
+        save_config_callback=None
     )
 
     if cli.config.subcmd == "fit":

@@ -27,6 +27,7 @@ class TextTranslationTransformer(LightningModule):
                  **kwargs):
         super().__init__()
         self.save_hyperparameters()  # The hyperparameters are saved to the “hyper_parameters” key in the checkpoint
+        self.validation_step_outputs = []
 
     def setup(self, stage: str) -> None:
         # Creating the model here instead of in __init__ to allow
@@ -73,13 +74,14 @@ class TextTranslationTransformer(LightningModule):
         return loss
 
     def _log_training_step(self, loss, predicted_logits, target_sequence):
-        self.log(f"train/loss", loss, on_step=True, on_epoch=True, reduce_fx='mean')
+        self.log(f"train/loss", loss, on_step=True, on_epoch=True, reduce_fx='mean', prog_bar=True)
 
         # Single token prediction accuracy
         pred_tokens = torch.argmax(predicted_logits, dim=2)
         single_tokens_predicted_right = (pred_tokens == target_sequence).float()  # TODO Beware of EOS != PAD
         single_token_pred_acc = single_tokens_predicted_right.mean()
-        self.log(f"train/acc_single_tok", single_token_pred_acc, on_step=True, on_epoch=True, reduce_fx='mean')
+        self.log(f"train/acc_single_tok",
+                 single_token_pred_acc, on_step=True, on_epoch=True, reduce_fx='mean', prog_bar=True)
 
         # Mean number of pad tokens in a batch
         pad_tokens_in_batch_target = (target_sequence == self.tgt_vocab.pad_token_idx)
@@ -124,11 +126,11 @@ class TextTranslationTransformer(LightningModule):
                                   target_ahead.reshape(-1))
         pred_tokens = torch.argmax(pred_logits, dim=2)
         self._log_validation_step(val_loss, pred_tokens, target_ahead)
-        return {"pred_tokens": pred_tokens, "target_ahead": target_ahead}
+        self.validation_step_outputs.append({"pred_tokens": pred_tokens, "target_ahead": target_ahead})
 
-    def validation_epoch_end(self, outputs: List[STEP_OUTPUT]) -> None:
+    def on_validation_epoch_end(self) -> None:
         total_correct, total = 0, 0
-        for o in outputs:
+        for o in self.validation_step_outputs:
             pred_tokens = o["pred_tokens"].cpu()
             target_ahead = o["target_ahead"].cpu()
             b_size = pred_tokens.size()[0]
@@ -138,6 +140,7 @@ class TextTranslationTransformer(LightningModule):
                 total_correct += int(predicted_str == target_str)
                 total += 1
         self.log("val/whole_seq_exact_match_acc_total", total_correct / total)
+        self.validation_step_outputs.clear()
 
     def test_step(self, batch, batch_idx) -> Optional[STEP_OUTPUT]:
         source, target = batch
