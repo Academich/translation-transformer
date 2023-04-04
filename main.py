@@ -4,7 +4,7 @@ from pytorch_lightning.cli import LightningCLI
 from pytorch_lightning.callbacks import BasePredictionWriter
 
 from src import TextTranslationTransformer
-from src import CopySequence
+from src import CopySequence, Generic
 from src import model_catalogue
 
 

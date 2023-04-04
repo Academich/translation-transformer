@@ -1,5 +1,5 @@
 from src.lightning_module import TextTranslationTransformer
-from src.wrappers import CopySequence
+from src.wrappers import CopySequence, Generic
 from src.model.model import VanillaTransformer
 
 
