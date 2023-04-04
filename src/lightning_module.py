@@ -23,8 +23,13 @@ class TextTranslationTransformer(LightningModule):
                  generation: str = "beam_search",
                  beam_size: int = 1,
                  max_len: int = 100,
-                 *args,
-                 **kwargs):
+                 num_encoder_layers: int = 3,
+                 num_decoder_layers: int = 3,
+                 embedding_dim: int = 128,
+                 num_heads: int = 4,
+                 feedforward_dim: int = 256,
+                 dropout_rate: float = 0.0,
+                 activation: str = "relu"):
         super().__init__()
         self.save_hyperparameters()  # The hyperparameters are saved to the “hyper_parameters” key in the checkpoint
         self.validation_step_outputs = []
