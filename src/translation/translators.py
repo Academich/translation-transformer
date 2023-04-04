@@ -70,7 +70,7 @@ class TranslationInferenceBeamSearch:
             logits = self.model(seq, torch.tensor([[self.bos_token]]).type_as(src))
             initial_pred_token = torch.topk(logits[0], k=self.beam_size, dim=-1)
             generated_tokens = torch.cat((torch.full((self.beam_size, 1),
-                                                     self.bos_token),
+                                                     self.bos_token).type_as(src),
                                           initial_pred_token.indices.t()), dim=-1)
             confidence = initial_pred_token.values.t()
             finished_beams = []
