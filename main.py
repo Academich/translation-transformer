@@ -1,4 +1,7 @@
+from pathlib import Path
+
 from pytorch_lightning.cli import LightningCLI
+from pytorch_lightning.callbacks import BasePredictionWriter
 
 from src import TextTranslationTransformer
 from src import CopySequence
@@ -41,13 +44,34 @@ class FlexibleCLI(LightningCLI):
         self.model_class.module_class = model_catalogue[self.config.model_name]
 
 
+class PredictionWriter(BasePredictionWriter):
+
+    def __init__(self, output_dir, write_interval='batch'):
+        super().__init__(write_interval)
+        self.output_path = Path(output_dir).resolve()
+        self.output_path.unlink(missing_ok=True)
+        self.output_path.parent.mkdir(exist_ok=True)
+
+    def write_on_batch_end(
+            self, trainer, pl_module, prediction, batch_indices, batch, batch_idx, dataloader_idx
+    ):
+        with open(self.output_path, "a") as f:
+            _, tgt = batch
+            for i, t in enumerate(tgt.cpu()):
+                t_string = pl_module.tgt_vocab.decode(t)
+                p_options = pl_module.tgt_vocab.decode_batch(prediction[i].cpu())
+                print(",".join([t_string] + p_options), file=f)
+
+
 if __name__ == '__main__':
+    cb_list = [PredictionWriter("results/predictions.csv")]
     model_class = TextTranslationTransformer
     cli = FlexibleCLI(
         model_class=TextTranslationTransformer,
         datamodule_class=CopySequence,
         run=False,
-        save_config_callback=None
+        save_config_callback=None,
+        trainer_defaults={"callbacks": cb_list}
     )
 
     if cli.config.subcmd == "fit":

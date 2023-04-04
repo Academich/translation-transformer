@@ -50,12 +50,12 @@ class TextTranslationTransformer(LightningModule):
         self.criterion = nn.CrossEntropyLoss(reduction="mean")
 
     def _create_generator(self):
-        self.generator = TranslationInferenceGreedy(self.model,
-                                                    # self.hparams.beam_size,
-                                                    self.hparams.max_len,
-                                                    self.tgt_vocab.pad_token_idx,
-                                                    self.tgt_vocab.bos_token_idx,
-                                                    self.tgt_vocab.eos_token_idx)
+        self.generator = TranslationInferenceBeamSearch(self.model,
+                                                        self.hparams.beam_size,
+                                                        self.hparams.max_len,
+                                                        self.tgt_vocab.pad_token_idx,
+                                                        self.tgt_vocab.bos_token_idx,
+                                                        self.tgt_vocab.eos_token_idx)
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
         return self.model(*args, **kwargs)
@@ -158,9 +158,7 @@ class TextTranslationTransformer(LightningModule):
     def predict_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> Any:
         source, _ = batch
         generated = self.generator.generate(source)
-        for p in generated:
-            generated_options = self.tgt_vocab.decode_batch(p.cpu())
-            return ",".join(generated_options)
+        return generated
 
     def configure_optimizers(self):
         d = self.model.emb_dim
