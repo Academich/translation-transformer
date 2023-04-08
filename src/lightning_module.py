@@ -162,7 +162,7 @@ class TextTranslationTransformer(LightningModule):
 
     def predict_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> Any:
         source, _ = batch
-        generated = self.generator.generate(source)
+        generated = self.generator.generate(source, n_best=self.hparams.beam_size)
         return generated
 
     def configure_optimizers(self):
