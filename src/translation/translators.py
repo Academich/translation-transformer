@@ -138,6 +138,7 @@ class TranslationInferenceBeamSearch:
 
             # Decode for one step using decoder
             decoder_output = self.model(src, batch_decoder_input)  # (bs, max_len, dict_len)
+            decoder_output = torch.log(torch.softmax(decoder_output, dim=-1))
 
             # check shape of the prediction
             dictnr_len = decoder_output.shape[2]
