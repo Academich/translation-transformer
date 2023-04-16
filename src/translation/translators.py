@@ -65,19 +65,72 @@ class TranslationInferenceBeamSearch:
 
     def __init__(self,
                  model: Callable[['torch.Tensor', 'torch.Tensor'], 'torch.Tensor'],
-                 beam_size: int,
+                 beam_width: int,
                  max_len: int,
                  pad_token: int,
                  bos_token: int,
                  eos_token: int):
         self.model = model
-        self.beam_size = beam_size
+        self.beam_width = beam_width
         self.max_len = max_len
         self.pad_token = pad_token
         self.bos_token = bos_token
         self.eos_token = eos_token
 
     def generate(self, src: 'torch.LongTensor', n_best) -> 'torch.LongTensor':
+        assert self.beam_width >= n_best
+        assert self.max_len > 1
+        bs = src.shape[0]
+
+        # Prepare first tokens for decoder (bs, max_len)
+        y = torch.tensor([self.bos_token]).repeat(bs, 1).long().type_as(src)  # (bs,1)
+
+        # Decode for one step using decoder
+        decoder_output = self.model(src, y)  # (bs, 1, dict_len)
+        logprob_decoder_output = torch.log(torch.softmax(decoder_output, dim=-1))
+
+        # check shape of the prediction
+        vocab_size = logprob_decoder_output.shape[-1]
+
+        probabilities, next_chars = torch.topk(logprob_decoder_output, self.beam_width,
+                                                 dim=-1, sorted=True)  # (bs, 1, beam_width), (bs, 1, beam_width)
+        probabilities = probabilities.squeeze(1)  # (bs, beam_width)
+        y = y.unsqueeze(1).repeat((1, 1, self.beam_width)).reshape(-1, 1)
+        # (beam_width * bs, 1)
+
+        next_chars = next_chars.reshape(-1, 1)  # (bs *beam_width, 1)
+        y = torch.cat((y, next_chars), axis=-1)  # (beam_width * bs, 2)
+
+        src_bw = src.repeat((self.beam_width, 1, 1)).transpose(0, 1).flatten(end_dim=1)  # (b_w, examples, length)
+        # (examples, beam_width, length) # fin_X [[5,20],[5,20],[5,20],[2,31],[2,31],[2,31]]
+        # (b_w * examples, length)
+
+        next_probabilities = []
+        predictions = self.max_len - 1
+
+        for i in range(predictions - 1):
+            next_probabilities = []
+
+            next_probabilities = torch.log(torch.softmax(self.model(src_bw, y), dim=-1))[:, -1, :]  # (bs*b_w, vocab_size)
+
+            next_probabilities = next_probabilities.reshape(
+                (-1, self.beam_width, next_probabilities.shape[-1]))  # (examples, b_w, vocab_size)
+
+            probabilities = probabilities.unsqueeze(-1) + next_probabilities
+            # (examples,b_w,1) + (examples,b_w,vocab_size) ->(examples,b_w,vocab_size)
+
+            probabilities = probabilities.flatten(start_dim=1)  # (examples,b_w * vocab_size)
+            probabilities, idx = probabilities.topk(k=self.beam_width, axis=-1, sorted=True)  # (examples,b_w), (examples,b_w)
+            next_chars = torch.remainder(idx, vocab_size).flatten().unsqueeze(-1)  # (examples * b_w,1)
+            best_candidates = (idx / vocab_size).long()  # (examples,b_w)
+            best_candidates += torch.arange(y.shape[0] // self.beam_width, device=src.device).unsqueeze(-1) * self.beam_width  # (beam_width * bs, 1)
+            y = y[best_candidates].flatten(end_dim=-2)  # (beam_width * bs, 2+i)
+            y = torch.cat((y, next_chars), axis=1)  # (beam_width * bs, 2+i)
+        y = y.reshape(bs, self.beam_width, self.max_len)
+        return y  # , probabilities  # (examples,b_w, max_len), (examples,b_w)
+
+
+    def generate2(self, src: 'torch.LongTensor', n_best) -> 'torch.LongTensor':
         """Batch Beam Seach Decoding for RNN
               Args:
                   src: (bs, max_len)
@@ -87,7 +140,7 @@ class TranslationInferenceBeamSearch:
                   n_best_list: Decoded N-best results. (bs, T)
               """
 
-        assert self.beam_size >= n_best
+        assert self.beam_width >= n_best
         assert self.max_len > 1
 
         n_best_list = []
@@ -142,11 +195,11 @@ class TranslationInferenceBeamSearch:
 
             # check shape of the prediction
             dictnr_len = decoder_output.shape[2]
-            assert self.beam_size <= dictnr_len
+            assert self.beam_width <= dictnr_len
             assert decoder_output.shape == (bs, self.max_len, dictnr_len)
 
             # Get top-k from this decoded result
-            topk_log_prob, topk_indexes = torch.topk(decoder_output, self.beam_size,
+            topk_log_prob, topk_indexes = torch.topk(decoder_output, self.beam_width,
                                                      dim=-1)  # (bs, max_len, beam_size), (bs, max_len, beam_size)
 
             # Then, register new top-k nodes
@@ -155,7 +208,7 @@ class TranslationInferenceBeamSearch:
                     continue
                 last_t_before_pad_id = nonpad_length_per_sid[sid] - 1
 
-                for new_cnddt in range(self.beam_size):
+                for new_cnddt in range(self.beam_width):
                     decoded_t = topk_indexes[sid][last_t_before_pad_id][new_cnddt].item()  # int64
                     logp = topk_log_prob[sid][last_t_before_pad_id][new_cnddt].item()  # float log probability val
                     batch_decoder_input[sid][last_t_before_pad_id + 1] = decoded_t
@@ -174,7 +227,7 @@ class TranslationInferenceBeamSearch:
         for sid in range(bs):
             # if this sentence hasn't come to its dot
             if len(eosnodes_per_sid[sid]) == 0:
-                eosnodes_per_sid[sid] = [heappop(nodetree_per_sid[sid]) for _ in range(self.beam_size)]
+                eosnodes_per_sid[sid] = [heappop(nodetree_per_sid[sid]) for _ in range(self.beam_width)]
 
             for decoded_seq_id, score_n_tuple in enumerate(eosnodes_per_sid[sid]):
                 n = score_n_tuple[1]
@@ -190,9 +243,9 @@ if __name__ == '__main__':
 
     tr = TranslationInferenceBeamSearch(model=MockCopySequence(),
                                         max_len=4,
-                                        beam_size=3,
+                                        beam_width=3,
                                         pad_token=MockCopySequence.pad_token,
                                         bos_token=MockCopySequence.bos_token,
                                         eos_token=MockCopySequence.eos_token)
-    src = torch.tensor([[1, 2, 3, 4, 10]])
-    print(tr.generate(src, n_best=3))
+    src = torch.tensor([[1, 2, 10]])
+    print(tr.generate(src, n_best=3))  # ещё надо отсортировать
