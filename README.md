@@ -7,6 +7,7 @@ Pytorch Lightning.
 pip install lightning
 pip install jsonargparse[signatures]
 pip install lightning[extra]
+pip install -e .
 ```
 
 ### Training
