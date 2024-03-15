@@ -3,8 +3,7 @@ from typing import Tuple, Optional
 from torch import LongTensor, Tensor
 from torch import nn
 
-from src.model.featurization.embeddings import TokenEmbedding
-from src.model.featurization.embeddings import PositionalEncoding
+from models.embeddings import TokenEmbedding, PositionalEncoding
 
 
 class VanillaTransformer(nn.Module):

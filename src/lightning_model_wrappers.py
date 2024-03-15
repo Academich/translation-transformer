@@ -8,8 +8,8 @@ from torch import optim
 from pytorch_lightning import LightningModule
 from pytorch_lightning.utilities.types import STEP_OUTPUT
 
-from src.wrappers import TokenVocabulary
-from src.translation.translators import TranslationInferenceBeamSearch, TranslationInferenceGreedy
+from data_wrappers import TokenVocabulary
+from translators import TranslationInferenceBeamSearch, TranslationInferenceGreedy
 
 
 class TextTranslationTransformer(LightningModule):
@@ -166,6 +166,7 @@ class TextTranslationTransformer(LightningModule):
         return generated
 
     def configure_optimizers(self):
+        # TODO add an option to have no schedulers
         d = self.model.emb_dim
         optimizer = optim.Adam(self.parameters(),
                                lr=self.hparams.learning_rate)

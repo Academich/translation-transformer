@@ -3,9 +3,9 @@ from pathlib import Path
 from pytorch_lightning.cli import LightningCLI
 from pytorch_lightning.callbacks import BasePredictionWriter
 
-from src import TextTranslationTransformer
-from src import CopySequence, Generic
-from src import model_catalogue
+from lightning_model_wrappers import TextTranslationTransformer
+from synthetic_tasks.copy_sequence.data_module import CopySequence
+from models import model_catalogue
 
 
 class FlexibleCLI(LightningCLI):

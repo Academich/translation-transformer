@@ -1,8 +1,3 @@
-from src.lightning_module import TextTranslationTransformer
-from src.wrappers import CopySequence, Generic
-from src.model.model import VanillaTransformer
+from src.lightning_model_wrappers import TextTranslationTransformer
+from src.synthetic_tasks.copy_sequence.data_module import CopySequence
 
-
-model_catalogue = {
-    "vanilla": VanillaTransformer
-}
