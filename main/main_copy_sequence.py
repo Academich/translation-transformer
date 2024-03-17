@@ -2,10 +2,20 @@ from pathlib import Path
 
 from pytorch_lightning.cli import LightningCLI
 from pytorch_lightning.callbacks import BasePredictionWriter
+from pytorch_lightning import Trainer
 
 from lightning_model_wrappers import VanillaTextTranslationTransformer
 from synthetic_tasks.copy_sequence.data_module import CopySequence
 from models import model_catalogue
+
+
+def build_trainer(*args, write_predictions_path=None, **kwargs) -> Trainer:
+    if write_predictions_path is None:
+        write_predictions_path = "results/predictions.csv"
+    cb_list = [PredictionWriter(write_predictions_path)]
+    kwargs = {**kwargs, **{"callbacks": kwargs["callbacks"] + cb_list}}
+    trainer_instance = Trainer(*args, **kwargs)
+    return trainer_instance
 
 
 class FlexibleCLI(LightningCLI):
@@ -61,13 +71,12 @@ class PredictionWriter(BasePredictionWriter):
 
 
 if __name__ == '__main__':
-    cb_list = [PredictionWriter("results/predictions.csv")]
     cli = FlexibleCLI(
         model_class=VanillaTextTranslationTransformer,
         datamodule_class=CopySequence,
         run=False,
         save_config_callback=None,
-        trainer_defaults={"callbacks": cb_list}
+        trainer_class=build_trainer
     )
 
     if cli.config.subcmd == "fit":
