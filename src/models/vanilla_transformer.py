@@ -15,8 +15,7 @@ class VanillaTransformer(nn.Module):
                  num_heads: int = 4,
                  feedforward_dim: int = 256,
                  dropout_rate: float = 0.0,
-                 activation: str = "relu",
-                 **kwargs  # UGLY to ignore unexpected arguments
+                 activation: str = "relu"
                  ):
         super().__init__()
         self.src_vocab_len: Optional[int] = None

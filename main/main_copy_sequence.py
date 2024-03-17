@@ -3,7 +3,7 @@ from pathlib import Path
 from pytorch_lightning.cli import LightningCLI
 from pytorch_lightning.callbacks import BasePredictionWriter
 
-from lightning_model_wrappers import TextTranslationTransformer
+from lightning_model_wrappers import VanillaTextTranslationTransformer
 from synthetic_tasks.copy_sequence.data_module import CopySequence
 from models import model_catalogue
 
@@ -40,9 +40,6 @@ class FlexibleCLI(LightningCLI):
                             choices=list(model_catalogue),
                             required=True, help="The model to use.")
 
-    def before_instantiate_classes(self) -> None:
-        self.model_class.module_class = model_catalogue[self.config.model_name]
-
 
 class PredictionWriter(BasePredictionWriter):
 
@@ -65,9 +62,8 @@ class PredictionWriter(BasePredictionWriter):
 
 if __name__ == '__main__':
     cb_list = [PredictionWriter("results/predictions.csv")]
-    model_class = TextTranslationTransformer
     cli = FlexibleCLI(
-        model_class=TextTranslationTransformer,
+        model_class=VanillaTextTranslationTransformer,
         datamodule_class=CopySequence,
         run=False,
         save_config_callback=None,

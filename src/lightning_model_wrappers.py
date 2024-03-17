@@ -9,11 +9,11 @@ from pytorch_lightning import LightningModule
 from pytorch_lightning.utilities.types import STEP_OUTPUT
 
 from data_wrappers import TokenVocabulary
+from models import VanillaTransformer
 from translators import TranslationInferenceBeamSearch, TranslationInferenceGreedy
 
 
-class TextTranslationTransformer(LightningModule):
-    module_class: Type[nn.Module] = None
+class VanillaTextTranslationTransformer(LightningModule):
 
     def __init__(self,
                  src_vocab_path: str,
@@ -38,7 +38,7 @@ class TextTranslationTransformer(LightningModule):
         # Creating the model here instead of in __init__ to allow
         # the data module to execute .prepare_data first
         self._load_vocabularies()
-        self._create_model(**self.hparams)
+        self._create_model()
         self._create_generator()
 
     def _load_vocabularies(self):
@@ -46,8 +46,14 @@ class TextTranslationTransformer(LightningModule):
             self.src_vocab = TokenVocabulary(json.load(fs))
             self.tgt_vocab = TokenVocabulary(json.load(ft))
 
-    def _create_model(self, *args, **kwargs):
-        self.model = self.module_class(*args, **kwargs)
+    def _create_model(self):
+        self.model = VanillaTransformer(self.hparams.num_encoder_layers,
+                                        self.hparams.num_decoder_layers,
+                                        self.hparams.embedding_dim,
+                                        self.hparams.num_heads,
+                                        self.hparams.feedforward_dim,
+                                        self.hparams.dropout_rate,
+                                        self.hparams.activation)
         self.model.src_vocab_len = self.src_vocab.n_tokens
         self.model.tgt_vocab_len = self.tgt_vocab.n_tokens
         self.model.pad_token_idx = self.src_vocab.pad_token_idx
