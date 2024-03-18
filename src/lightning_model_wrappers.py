@@ -29,7 +29,7 @@ class VanillaTextTranslationTransformer(LightningModule):
                  bos_token_idx: int = 1,
                  eos_token_idx: int = 2,
 
-                 learning_rate: float = 3e-4,  # Optimization arguments
+                 learning_rate: float = 0.1,  # Optimization arguments
                  warmup_steps: int = 200,
 
                  generation: str = "beam_search",  # Prediction generation arguments
