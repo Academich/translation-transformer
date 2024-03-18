@@ -1,6 +1,6 @@
 # TODO A file with only base classes to inherit from?
 
-from typing import List, Tuple, Optional, Mapping, Union
+from typing import List, Tuple, Optional, Union
 from multiprocessing import cpu_count
 from pathlib import Path
 
@@ -11,54 +11,20 @@ from torch.nn.utils.rnn import pad_sequence
 from pytorch_lightning import LightningDataModule
 
 
-class TokenVocabulary:
-
-    def __init__(self,
-                 vocab: Mapping[Union[int, str], str],
-                 bos_token_idx: int = 1,
-                 eos_token_idx: int = 2,
-                 pad_token_idx: int = 0):
-        self.vocab = {int(k): v for k, v in vocab.items()}
-        self.bos_token_idx = bos_token_idx
-        self.eos_token_idx = eos_token_idx
-        self.pad_token_idx = pad_token_idx
-        self.service_tokens = (bos_token_idx, eos_token_idx, pad_token_idx)
-        self.n_tokens = len(self.vocab)
-
-    def decode(self, tokens: torch.LongTensor):
-        decoded_chars = []
-        for i in tokens.numpy():
-            if i == self.eos_token_idx:
-                break
-            if i not in self.service_tokens:
-                decoded_chars.append(self.vocab[i])
-
-        decoded_string = "".join(decoded_chars)
-        return decoded_string
-
-    def decode_batch(self, tokens: torch.LongTensor):
-        return [self.decode(tokens[i]) for i in range(tokens.size()[0])]
-
-
 class Seq2SeqDataset(Dataset):
 
-    def __init__(self, src_path: Union[Path, str], tgt_path: Optional[Union[Path, str]] = None):
-        with open(src_path, "rb") as f:
-            self.domain = torch.load(f)
-            self.target = None
-        if tgt_path is not None:
-            with open(tgt_path, "rb") as g:
-                self.target = torch.load(g)
-        else:
-            self.target = self.domain
+    def __init__(self, src_path: Path | str, tgt_path: Path | str):
+        with open(src_path) as fs, open(tgt_path) as ft:
+            self.source = [s.strip() for s in fs.readlines()]
+            self.target = [s.strip() for s in ft.readlines()]
+        assert len(self.source) == len(
+            self.target), f"The source and target data at {src_path} and {tgt_path} have different lenghts"
 
     def __len__(self):
-        return len(self.domain)
+        return len(self.source)
 
-    def __getitem__(self, item):
-        src_tokens = self.domain[item]
-        tgt_tokens = self.target[item]
-        return src_tokens, tgt_tokens
+    def __getitem__(self, item) -> tuple[str, str]:
+        return self.source[item], self.target[item]
 
 
 class Generic(LightningDataModule):
