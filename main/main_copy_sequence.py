@@ -1,21 +1,13 @@
+import json
 from pathlib import Path
 
 from pytorch_lightning.cli import LightningCLI
-from pytorch_lightning.callbacks import BasePredictionWriter
-from pytorch_lightning import Trainer
 
 from lightning_model_wrappers import VanillaTextTranslationTransformer
 from synthetic_tasks.copy_sequence.data_module import CopySequence
-from models import model_catalogue
+from synthetic_tasks.copy_sequence.tokenizer import AsciiTokenizer
 
-
-def build_trainer(*args, write_predictions_path=None, **kwargs) -> Trainer:
-    if write_predictions_path is None:
-        write_predictions_path = "results/predictions.csv"
-    cb_list = [PredictionWriter(write_predictions_path)]
-    kwargs = {**kwargs, **{"callbacks": kwargs["callbacks"] + cb_list}}
-    trainer_instance = Trainer(*args, **kwargs)
-    return trainer_instance
+from callbacks import PredictionWriter, DecodingCallback
 
 
 class FlexibleCLI(LightningCLI):
@@ -45,29 +37,59 @@ class FlexibleCLI(LightningCLI):
             If resuming from mid-epoch checkpoint, training will start from the beginning of the next epoch.
             (type: Union[str, null])""")
 
-        parser.add_argument("--model_name", "-m",
-                            type=str,
-                            choices=list(model_catalogue),
-                            required=True, help="The model to use.")
+        parser.add_argument("--src_vocab_path", type=str, default=None,
+                            help="""
+                    Path to the source sequence tokenizer vocabulary JSON""")
 
+        parser.add_argument("--tgt_vocab_path", type=str, default=None,
+                            help="""
+                    Path to the target sequence tokenizer vocabulary JSON""")
 
-class PredictionWriter(BasePredictionWriter):
+        parser.add_argument("--write_predictions_path", type=str, default=None,
+                            help="""
+                            Path to the file to store the decoded predictions to""")
 
-    def __init__(self, output_dir, write_interval='batch'):
-        super().__init__(write_interval)
-        self.output_path = Path(output_dir).resolve()
-        self.output_path.unlink(missing_ok=True)
-        self.output_path.parent.mkdir(exist_ok=True)
+    def before_instantiate_classes(self) -> None:
+        # Creating tokenizers
+        src_tokenizer = AsciiTokenizer()
+        tgt_tokenizer = AsciiTokenizer()
+        if self.config.src_vocab_path is not None:
+            src_tokenizer.load_vocab(self.config.src_vocab_path)
+        else:
+            data_dir = Path(self.config.data.data_dir).resolve()
+            save_vocab_dir = data_dir / "vocabs"
+            save_vocab_dir.mkdir(parents=True, exist_ok=True)
+            src_tokenizer.train_tokenizer(data_dir / "src-train.txt")
+            src_tokenizer.save_vocab(save_vocab_dir / "src-vocab.json")
+        if self.config.tgt_vocab_path is not None:
+            tgt_tokenizer.load_vocab(self.config.tgt_vocab_path)
+        else:
+            data_dir = Path(self.config.data.data_dir).resolve()
+            save_vocab_dir = data_dir / "vocabs"
+            save_vocab_dir.mkdir(parents=True, exist_ok=True)
+            tgt_tokenizer.train_tokenizer(data_dir / "tgt-train.txt")
+            tgt_tokenizer.save_vocab(save_vocab_dir / "tgt-vocab.json")
 
-    def write_on_batch_end(
-            self, trainer, pl_module, prediction, batch_indices, batch, batch_idx, dataloader_idx
-    ):
-        with open(self.output_path, "a") as f:
-            _, tgt = batch
-            for i, t in enumerate(tgt.cpu()):
-                t_string = pl_module.tgt_vocab.decode(t)
-                p_options = pl_module.tgt_vocab.decode_batch(prediction[i].cpu())
-                print(",".join([t_string] + p_options), file=f)
+        # Connecting the tokenizers to the model and the data module
+        self.config.data.src_tokenizer = src_tokenizer
+        self.config.data.tgt_tokenizer = tgt_tokenizer
+        self.config.model.src_vocab_size = src_tokenizer.n_tokens
+        self.config.model.tgt_vocab_size = tgt_tokenizer.n_tokens
+        self.config.model.pad_token_idx = tgt_tokenizer.pad_token_idx
+        self.config.model.bos_token_idx = tgt_tokenizer.bos_token_idx
+        self.config.model.eos_token_idx = tgt_tokenizer.eos_token_idx
+
+        # Creating callbacks
+        if self.config.write_predictions_path is None:
+            self.config.write_predictions_path = "results/predictions.csv"
+        cb_list = [PredictionWriter(self.config.write_predictions_path, tgt_tokenizer),
+                   DecodingCallback(tgt_tokenizer)]
+
+        # Connecting callbacks to the trainer instance
+        if self.config.trainer.callbacks is None:
+            self.config.trainer.callbacks = []
+        for cb in cb_list:
+            self.config.trainer.callbacks.append(cb)
 
 
 if __name__ == '__main__':
@@ -76,7 +98,6 @@ if __name__ == '__main__':
         datamodule_class=CopySequence,
         run=False,
         save_config_callback=None,
-        trainer_class=build_trainer
     )
 
     if cli.config.subcmd == "fit":

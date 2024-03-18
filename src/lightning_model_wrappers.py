@@ -8,7 +8,6 @@ from torch import optim
 from pytorch_lightning import LightningModule
 from pytorch_lightning.utilities.types import STEP_OUTPUT
 
-from data_wrappers import TokenVocabulary
 from models import VanillaTransformer
 from translators import TranslationInferenceBeamSearch, TranslationInferenceGreedy
 
@@ -16,47 +15,45 @@ from translators import TranslationInferenceBeamSearch, TranslationInferenceGree
 class VanillaTextTranslationTransformer(LightningModule):
 
     def __init__(self,
-                 src_vocab_path: str,
-                 tgt_vocab_path: str,
-                 learning_rate: float = 3e-4,
-                 warmup_steps: int = 200,
-                 generation: str = "beam_search",
-                 beam_size: int = 1,
-                 max_len: int = 100,
+                 src_vocab_size: int | None = None,  # Model size and architecture arguments
+                 tgt_vocab_size: int | None = None,
+                 embedding_dim: int = 128,
+                 feedforward_dim: int = 256,
                  num_encoder_layers: int = 3,
                  num_decoder_layers: int = 3,
-                 embedding_dim: int = 128,
                  num_heads: int = 4,
-                 feedforward_dim: int = 256,
                  dropout_rate: float = 0.0,
-                 activation: str = "relu"):
-        super().__init__()
-        self.save_hyperparameters()  # The hyperparameters are saved to the “hyper_parameters” key in the checkpoint
-        self.validation_step_outputs = []
+                 activation: str = "relu",
 
-    def setup(self, stage: str) -> None:
-        # Creating the model here instead of in __init__ to allow
-        # the data module to execute .prepare_data first
-        self._load_vocabularies()
+                 pad_token_idx: int = 0,  # Service token indices
+                 bos_token_idx: int = 1,
+                 eos_token_idx: int = 2,
+
+                 learning_rate: float = 3e-4,  # Optimization arguments
+                 warmup_steps: int = 200,
+
+                 generation: str = "beam_search",  # Prediction generation arguments
+                 beam_size: int = 1,
+                 max_len: int = 100
+                 ):
+        super().__init__()
+        self.save_hyperparameters()
         self._create_model()
         self._create_generator()
 
-    def _load_vocabularies(self):
-        with open(self.hparams.src_vocab_path) as fs, open(self.hparams.tgt_vocab_path) as ft:
-            self.src_vocab = TokenVocabulary(json.load(fs))
-            self.tgt_vocab = TokenVocabulary(json.load(ft))
+        self.validation_step_outputs = []
 
     def _create_model(self):
-        self.model = VanillaTransformer(self.hparams.num_encoder_layers,
+        self.model = VanillaTransformer(self.hparams.src_vocab_size,
+                                        self.hparams.tgt_vocab_size,
+                                        self.hparams.num_encoder_layers,
                                         self.hparams.num_decoder_layers,
                                         self.hparams.embedding_dim,
                                         self.hparams.num_heads,
                                         self.hparams.feedforward_dim,
                                         self.hparams.dropout_rate,
-                                        self.hparams.activation)
-        self.model.src_vocab_len = self.src_vocab.n_tokens
-        self.model.tgt_vocab_len = self.tgt_vocab.n_tokens
-        self.model.pad_token_idx = self.src_vocab.pad_token_idx
+                                        self.hparams.activation,
+                                        self.hparams.pad_token_idx)
         self.model.create()
         self.criterion = nn.CrossEntropyLoss(reduction="mean")
 
@@ -64,9 +61,9 @@ class VanillaTextTranslationTransformer(LightningModule):
         self.generator = TranslationInferenceBeamSearch(self.model,
                                                         self.hparams.beam_size,
                                                         self.hparams.max_len,
-                                                        self.tgt_vocab.pad_token_idx,
-                                                        self.tgt_vocab.bos_token_idx,
-                                                        self.tgt_vocab.eos_token_idx)
+                                                        self.hparams.pad_token_idx,
+                                                        self.hparams.bos_token_idx,
+                                                        self.hparams.eos_token_idx)
 
     def forward(self, *args: Any, **kwargs: Any) -> Any:
         return self.model(*args, **kwargs)
@@ -79,7 +76,7 @@ class VanillaTextTranslationTransformer(LightningModule):
         target_ahead = target[:, 1:]
         pred_logits = self(source, target_behind)
 
-        loss = self.criterion(pred_logits.reshape(-1, self.tgt_vocab.n_tokens),
+        loss = self.criterion(pred_logits.reshape(-1, self.hparams.tgt_vocab_size),
                               target_ahead.reshape(-1))
         self._log_training_step(loss, pred_logits, target_ahead)
         return loss
@@ -95,12 +92,12 @@ class VanillaTextTranslationTransformer(LightningModule):
                  single_token_pred_acc, on_step=True, on_epoch=True, reduce_fx='mean', prog_bar=True)
 
         # Mean number of pad tokens in a batch
-        pad_tokens_in_batch_target = (target_sequence == self.tgt_vocab.pad_token_idx)
+        pad_tokens_in_batch_target = (target_sequence == self.hparams.pad_token_idx)
         self.log(f"train/pads_in_batch_tgt", pad_tokens_in_batch_target.float().mean(), on_step=True, on_epoch=True,
                  reduce_fx='mean')
 
         # Mean number of EOS tokens in predictions in a batch
-        eos_in_pred_batch = (pred_tokens == self.tgt_vocab.eos_token_idx)
+        eos_in_pred_batch = (pred_tokens == self.hparams.eos_token_idx)
         self.log(f"train/eos_in_batch_pred", eos_in_pred_batch.float().mean(), on_step=True, on_epoch=True,
                  reduce_fx='mean')
 
@@ -117,12 +114,12 @@ class VanillaTextTranslationTransformer(LightningModule):
                  on_epoch=False, reduce_fx='mean')
 
         # Mean number of pad tokens in a batch
-        pad_tokens_in_batch_target = (target_sequence == self.tgt_vocab.pad_token_idx)
+        pad_tokens_in_batch_target = (target_sequence == self.hparams.pad_token_idx)
         self.log(f"val/pads_in_batch_tgt", pad_tokens_in_batch_target.float().mean(), on_step=True, on_epoch=True,
                  reduce_fx='mean')
 
         # Mean number of EOS tokens in predictions in a batch
-        eos_in_pred_batch = (predicted_tokens == self.tgt_vocab.eos_token_idx)
+        eos_in_pred_batch = (predicted_tokens == self.hparams.eos_token_idx)
         self.log(f"val/eos_in_batch_pred", eos_in_pred_batch.float().mean(), on_step=True, on_epoch=True,
                  reduce_fx='mean')
 
@@ -133,25 +130,11 @@ class VanillaTextTranslationTransformer(LightningModule):
         target_ahead = target[:, 1:]
         pred_logits = self(source, target_behind)
 
-        val_loss = self.criterion(pred_logits.reshape(-1, self.tgt_vocab.n_tokens),
+        val_loss = self.criterion(pred_logits.reshape(-1, self.hparams.tgt_vocab_size),
                                   target_ahead.reshape(-1))
         pred_tokens = torch.argmax(pred_logits, dim=2)
         self._log_validation_step(val_loss, pred_tokens, target_ahead)
         self.validation_step_outputs.append({"pred_tokens": pred_tokens, "target_ahead": target_ahead})
-
-    def on_validation_epoch_end(self) -> None:
-        total_correct, total = 0, 0
-        for o in self.validation_step_outputs:
-            pred_tokens = o["pred_tokens"].cpu()
-            target_ahead = o["target_ahead"].cpu()
-            b_size = pred_tokens.size()[0]
-            for i in range(b_size):
-                target_str = self.tgt_vocab.decode(target_ahead[i])
-                predicted_str = self.tgt_vocab.decode(pred_tokens[i])
-                total_correct += int(predicted_str == target_str)
-                total += 1
-        self.log("val/whole_seq_exact_match_acc_total", total_correct / total)
-        self.validation_step_outputs.clear()
 
     def test_step(self, batch, batch_idx) -> Optional[STEP_OUTPUT]:
         source, target = batch
@@ -160,7 +143,7 @@ class VanillaTextTranslationTransformer(LightningModule):
         target_ahead = target[:, 1:]
         pred_logits = self(source, target_behind)
 
-        test_loss = self.criterion(pred_logits.reshape(-1, self.tgt_vocab.n_tokens),
+        test_loss = self.criterion(pred_logits.reshape(-1, self.hparams.tgt_vocab_size),
                                    target_ahead.reshape(-1))
         self.log(f"test/loss", test_loss, on_step=False, on_epoch=True, reduce_fx='mean')
 

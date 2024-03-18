@@ -9,18 +9,21 @@ from models.embeddings import TokenEmbedding, PositionalEncoding
 class VanillaTransformer(nn.Module):
 
     def __init__(self,
+                 src_vocab_size: int,
+                 tgt_vocab_size: int,
                  num_encoder_layers: int = 3,
                  num_decoder_layers: int = 3,
                  embedding_dim: int = 128,
                  num_heads: int = 4,
                  feedforward_dim: int = 256,
                  dropout_rate: float = 0.0,
-                 activation: str = "relu"
+                 activation: str = "relu",
+                 pad_token_idx: int = 0
                  ):
         super().__init__()
-        self.src_vocab_len: Optional[int] = None
-        self.tgt_vocab_len: Optional[int] = None
-        self.pad_token_idx: Optional[int] = None
+        self.src_vocab_size = src_vocab_size
+        self.tgt_vocab_size = tgt_vocab_size
+        self.pad_token_idx = pad_token_idx
 
         self.num_enc_layers = num_encoder_layers
         self.num_dec_layers = num_decoder_layers
@@ -32,11 +35,11 @@ class VanillaTransformer(nn.Module):
 
     def create(self):
         # Embedding constructor
-        self.src_token_featurizer = TokenEmbedding(self.src_vocab_len,
-                                                   self.emb_dim)
+        self.src_token_featurizer = TokenEmbedding(self.src_vocab_size,
+                                                   self.emb_dim, padding_idx=self.pad_token_idx)
 
-        self.tgt_token_featurizer = TokenEmbedding(self.tgt_vocab_len,
-                                                   self.emb_dim)
+        self.tgt_token_featurizer = TokenEmbedding(self.tgt_vocab_size,
+                                                   self.emb_dim, padding_idx=self.pad_token_idx)
 
         self.positional_encoding = PositionalEncoding(self.emb_dim)
 
@@ -52,7 +55,7 @@ class VanillaTransformer(nn.Module):
                                           batch_first=True)
 
         # Decision function
-        self.next_token_classifier = nn.Linear(self.emb_dim, self.tgt_vocab_len)
+        self.next_token_classifier = nn.Linear(self.emb_dim, self.tgt_vocab_size)
 
     def _featurize(self, src: LongTensor, tgt: LongTensor) -> Tuple[Tensor, Tensor]:
         src_emb = self.positional_encoding(self.src_token_featurizer(src))
