@@ -70,73 +70,60 @@ class VanillaTextTranslationTransformer(LightningModule):
     def forward(self, *args: Any, **kwargs: Any) -> Any:
         return self.model(*args, **kwargs)
 
+    def _calc_loss(self, logits, tgt_ids):
+        return self.criterion(logits.reshape(-1, self.hparams.tgt_vocab_size),
+                              tgt_ids.reshape(-1))
+
+    def _calc_token_acc(self, pred_ids, tgt_ids):
+        single_tokens_predicted_right = (pred_ids == tgt_ids).float()  # TODO Beware of EOS != PAD
+        return single_tokens_predicted_right.mean()
+
+    def _calc_sequence_acc(self, pred_ids, tgt_ids):
+
+        """
+        Checks how many sequences in a batch are predicted perfectly.
+        Considers only the tokens before the first end-of-sequence token.
+        """
+        hit: torch.LongTensor = (pred_ids == tgt_ids).long()
+        eos: torch.BoolTensor = tgt_ids == self.hparams.eos_token_idx
+        return hit.cumsum(dim=-1)[eos.roll(-1, dims=-1)] == eos.nonzero(as_tuple=True)[1]
+
     def training_step(self, batch, batch_idx) -> STEP_OUTPUT:
         source, target = batch
 
         # We predict the next token given the previous ones
-        target_behind = target[:, :-1]
-        target_ahead = target[:, 1:]
-        pred_logits = self.__call__(source, target_behind)
+        target_given = target[:, :-1]
+        target_future = target[:, 1:]
+        pred_logits = self.__call__(source, target_given)
+        loss = self._calc_loss(pred_logits, target_future)
 
-        loss = self.criterion(pred_logits.reshape(-1, self.hparams.tgt_vocab_size),
-                              target_ahead.reshape(-1))
-        self._log_training_step(loss, pred_logits, target_ahead)
+        pred_tokens = torch.argmax(pred_logits, dim=2)
+        token_acc = self._calc_token_acc(pred_tokens, target_future)
+        sequence_acc = self._calc_sequence_acc(pred_tokens, target_future)
+        mean_pad_tokens_in_target = (target_future == self.hparams.pad_token_idx).float().mean()
+
+        self.log(f"train/loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log(f"train/acc_single_tok", token_acc, on_step=True, on_epoch=True, prog_bar=True)
+        self.log(f"train/acc_sequence", sequence_acc, on_step=True, on_epoch=True, prog_bar=False)
+        self.log(f"train/pads_in_batch_tgt", mean_pad_tokens_in_target, on_step=True, on_epoch=True, prog_bar=False)
         return loss
 
-    def _log_training_step(self, loss, predicted_logits, target_sequence):
-        self.log(f"train/loss", loss, on_step=True, on_epoch=True, reduce_fx='mean', prog_bar=True)
-
-        # Single token prediction accuracy
-        pred_tokens = torch.argmax(predicted_logits, dim=2)
-        single_tokens_predicted_right = (pred_tokens == target_sequence).float()  # TODO Beware of EOS != PAD
-        single_token_pred_acc = single_tokens_predicted_right.mean()
-        self.log(f"train/acc_single_tok",
-                 single_token_pred_acc, on_step=True, on_epoch=True, reduce_fx='mean', prog_bar=True)
-
-        # Mean number of pad tokens in a batch
-        pad_tokens_in_batch_target = (target_sequence == self.hparams.pad_token_idx)
-        self.log(f"train/pads_in_batch_tgt", pad_tokens_in_batch_target.float().mean(), on_step=True, on_epoch=True,
-                 reduce_fx='mean')
-
-        # Mean number of EOS tokens in predictions in a batch
-        eos_in_pred_batch = (pred_tokens == self.hparams.eos_token_idx)
-        self.log(f"train/eos_in_batch_pred", eos_in_pred_batch.float().mean(), on_step=True, on_epoch=True,
-                 reduce_fx='mean')
-
-    def _log_validation_step(self, val_loss, predicted_tokens, target_sequence):
-        self.log(f"val/loss", val_loss, on_step=True, on_epoch=True, reduce_fx='mean')
-
-        # Single token prediction accuracy
-        single_tokens_predicted_right = (predicted_tokens == target_sequence).float()  # TODO Beware of EOS != PAD
-        single_token_pred_acc = single_tokens_predicted_right.mean()  # TODO Correct by pad tokens
-        self.log(f"train/acc_single_tok", single_token_pred_acc, on_step=True, on_epoch=True, reduce_fx='mean')
-
-        # Number of tokens in batch
-        self.log(f"val/tokens_in_batch", target_sequence.shape[0] * (target_sequence.shape[1] + 1), on_step=True,
-                 on_epoch=False, reduce_fx='mean')
-
-        # Mean number of pad tokens in a batch
-        pad_tokens_in_batch_target = (target_sequence == self.hparams.pad_token_idx)
-        self.log(f"val/pads_in_batch_tgt", pad_tokens_in_batch_target.float().mean(), on_step=True, on_epoch=True,
-                 reduce_fx='mean')
-
-        # Mean number of EOS tokens in predictions in a batch
-        eos_in_pred_batch = (predicted_tokens == self.hparams.eos_token_idx)
-        self.log(f"val/eos_in_batch_pred", eos_in_pred_batch.float().mean(), on_step=True, on_epoch=True,
-                 reduce_fx='mean')
-
-    def validation_step(self, batch, batch_idx) -> Optional[STEP_OUTPUT]:
+    def validation_step(self, batch, batch_idx):
         source, target = batch
 
-        target_behind = target[:, :-1]
-        target_ahead = target[:, 1:]
-        pred_logits = self(source, target_behind)
+        target_given = target[:, :-1]
+        target_future = target[:, 1:]
+        pred_logits = self.__call__(source, target_given)
 
-        val_loss = self.criterion(pred_logits.reshape(-1, self.hparams.tgt_vocab_size),
-                                  target_ahead.reshape(-1))
+        loss = self._calc_loss(pred_logits, target_future)
+
         pred_tokens = torch.argmax(pred_logits, dim=2)
-        self._log_validation_step(val_loss, pred_tokens, target_ahead)
-        self.validation_step_outputs.append({"pred_tokens": pred_tokens, "target_ahead": target_ahead})
+        token_acc = self._calc_token_acc(pred_tokens, target_future)
+        sequence_acc = self._calc_sequence_acc(pred_tokens, target_future)
+
+        self.log(f"val/loss", loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log(f"val/acc_single_tok", token_acc, on_step=False, on_epoch=True, prog_bar=False)
+        self.log(f"val/acc_sequence", sequence_acc, on_step=False, on_epoch=True, prog_bar=False)
 
     def test_step(self, batch, batch_idx) -> Optional[STEP_OUTPUT]:
         source, target = batch
