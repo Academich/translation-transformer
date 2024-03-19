@@ -29,8 +29,10 @@ class VanillaTextTranslationTransformer(LightningModule):
                  bos_token_idx: int = 1,
                  eos_token_idx: int = 2,
 
-                 learning_rate: float = 0.1,  # Optimization arguments
-                 warmup_steps: int | None = None,
+                 learning_rate: float = 3e-4,  # Optimization arguments
+                 weight_decay: float = 0.,
+                 scheduler: str = "const",
+                 warmup_steps: int = 0,
 
                  generation: str = "beam_search",  # Prediction generation arguments
                  beam_size: int = 1,
@@ -74,7 +76,7 @@ class VanillaTextTranslationTransformer(LightningModule):
         # We predict the next token given the previous ones
         target_behind = target[:, :-1]
         target_ahead = target[:, 1:]
-        pred_logits = self(source, target_behind)
+        pred_logits = self.__call__(source, target_behind)
 
         loss = self.criterion(pred_logits.reshape(-1, self.hparams.tgt_vocab_size),
                               target_ahead.reshape(-1))
@@ -155,19 +157,37 @@ class VanillaTextTranslationTransformer(LightningModule):
         return generated
 
     def configure_optimizers(self):
-        optimizer = optim.Adam(self.parameters(), lr=self.hparams.learning_rate)
-        if self.hparams.warmup_steps is None:
-            return optimizer
+        optimizer = optim.Adam(self.parameters(),
+                               lr=self.hparams.learning_rate,
+                               weight_decay=self.hparams.weight_decay,
+                               betas=(0.9, 0.999))
 
-        d = self.model.emb_dim
-        scheduler = {
-            "scheduler": optim.lr_scheduler.LambdaLR(
-                optimizer,
-                lambda i: d ** (-0.5) * min((i + 1) ** (-0.5),
-                                            (i + 1) * self.hparams.warmup_steps ** (-1.5))
-            ),
-            "name": "Noam scheduler",
-            "interval": "step",
-            "frequency": 1,
-        }
+        sched_name = self.hparams.scheduler
+        lr = self.hparams.learning_rate
+        ws = self.hparams.warmup_steps
+        if sched_name == "const":
+            if ws == 0:
+                ws = 1
+            scheduler = {
+                "scheduler": optim.lr_scheduler.LambdaLR(
+                    optimizer,
+                    lambda i: min((lr / ws) * (i + 1), lr)
+                ),
+                "name": "Constant LR scheduler",
+                "interval": "step",
+                "frequency": 1,
+            }
+        elif sched_name == "noam":
+            scheduler = {
+                "scheduler": optim.lr_scheduler.LambdaLR(
+                    optimizer,
+                    lambda i: self.model.emb_dim ** (-0.5) * min((i + 1) ** (-0.5), (i + 1) * ws ** (-1.5))
+                ),
+                "name": "Noam scheduler",
+                "interval": "step",
+                "frequency": 1,
+            }
+        else:
+            raise ValueError(f'Unknown scheduler name {self.hparams.scheduler}. Options are "const", "noam".')
+
         return [optimizer], [scheduler]
