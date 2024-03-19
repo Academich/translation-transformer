@@ -10,6 +10,7 @@ from pytorch_lightning.utilities.types import STEP_OUTPUT
 
 from models import VanillaTransformer
 from translators import TranslationInferenceBeamSearch, TranslationInferenceGreedy
+from utils import NoamLRSchedule, ConstantLRSchedule, calc_token_acc, calc_sequence_acc
 
 
 class VanillaTextTranslationTransformer(LightningModule):
@@ -74,20 +75,6 @@ class VanillaTextTranslationTransformer(LightningModule):
         return self.criterion(logits.reshape(-1, self.hparams.tgt_vocab_size),
                               tgt_ids.reshape(-1))
 
-    def _calc_token_acc(self, pred_ids, tgt_ids):
-        single_tokens_predicted_right = (pred_ids == tgt_ids).float()  # TODO Beware of EOS != PAD
-        return single_tokens_predicted_right.mean()
-
-    def _calc_sequence_acc(self, pred_ids, tgt_ids):
-
-        """
-        Checks how many sequences in a batch are predicted perfectly.
-        Considers only the tokens before the first end-of-sequence token.
-        """
-        hit: torch.LongTensor = (pred_ids == tgt_ids).long()
-        eos: torch.BoolTensor = tgt_ids == self.hparams.eos_token_idx
-        return hit.cumsum(dim=-1)[eos.roll(-1, dims=-1)] == eos.nonzero(as_tuple=True)[1]
-
     def training_step(self, batch, batch_idx) -> STEP_OUTPUT:
         source, target = batch
 
@@ -98,8 +85,8 @@ class VanillaTextTranslationTransformer(LightningModule):
         loss = self._calc_loss(pred_logits, target_future)
 
         pred_tokens = torch.argmax(pred_logits, dim=2)
-        token_acc = self._calc_token_acc(pred_tokens, target_future)
-        sequence_acc = self._calc_sequence_acc(pred_tokens, target_future)
+        token_acc = calc_token_acc(pred_tokens, target_future)
+        sequence_acc = calc_sequence_acc(pred_tokens, target_future, self.hparams.eos_token_idx)
         mean_pad_tokens_in_target = (target_future == self.hparams.pad_token_idx).float().mean()
 
         self.log(f"train/loss", loss, on_step=True, on_epoch=True, prog_bar=True)
@@ -118,12 +105,13 @@ class VanillaTextTranslationTransformer(LightningModule):
         loss = self._calc_loss(pred_logits, target_future)
 
         pred_tokens = torch.argmax(pred_logits, dim=2)
-        token_acc = self._calc_token_acc(pred_tokens, target_future)
-        sequence_acc = self._calc_sequence_acc(pred_tokens, target_future)
+        token_acc = calc_token_acc(pred_tokens, target_future)
+        sequence_acc = calc_sequence_acc(pred_tokens, target_future, self.hparams.eos_token_idx)
 
         self.log(f"val/loss", loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log(f"val/acc_single_tok", token_acc, on_step=False, on_epoch=True, prog_bar=False)
         self.log(f"val/acc_sequence", sequence_acc, on_step=False, on_epoch=True, prog_bar=False)
+        self.validation_step_outputs.append({"pred_tokens": pred_tokens, "target_ahead": target_future})
 
     def test_step(self, batch, batch_idx) -> Optional[STEP_OUTPUT]:
         source, target = batch
@@ -153,12 +141,12 @@ class VanillaTextTranslationTransformer(LightningModule):
         lr = self.hparams.learning_rate
         ws = self.hparams.warmup_steps
         if sched_name == "const":
-            if ws == 0:
-                ws = 1
+            if ws == 0:  # TODO Ugly crutch
+                return optimizer
             scheduler = {
                 "scheduler": optim.lr_scheduler.LambdaLR(
                     optimizer,
-                    lambda i: min((lr / ws) * (i + 1), lr)
+                    ConstantLRSchedule(lr, ws)  # TODO does not work idk
                 ),
                 "name": "Constant LR scheduler",
                 "interval": "step",
@@ -168,7 +156,7 @@ class VanillaTextTranslationTransformer(LightningModule):
             scheduler = {
                 "scheduler": optim.lr_scheduler.LambdaLR(
                     optimizer,
-                    lambda i: self.model.emb_dim ** (-0.5) * min((i + 1) ** (-0.5), (i + 1) * ws ** (-1.5))
+                    NoamLRSchedule(self.hparams.embedding_dim, lr, ws)
                 ),
                 "name": "Noam scheduler",
                 "interval": "step",
