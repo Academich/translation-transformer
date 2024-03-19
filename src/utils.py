@@ -9,8 +9,8 @@ class ConstantLRSchedule:
         i = current step
         """
         if self.ws > 0 and i < self.ws:
-            return (self.lr / (self.ws + 1)) * (i + 1)
-        return self.lr
+            return (i + 1) / (self.ws + 1)
+        return 1
 
 
 class NoamLRSchedule:
@@ -24,7 +24,7 @@ class NoamLRSchedule:
         """
         i = current step
         """
-        return self.mult * min((i + 1) ** (-0.5), (i + 1) * self.ws ** (-1.5))
+        return self.mult * min((i + 1) ** (-0.5), (i + 1) * (self.ws + 1) ** (-1.5))
 
 
 # === Metrics ====

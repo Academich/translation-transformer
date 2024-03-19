@@ -141,12 +141,10 @@ class VanillaTextTranslationTransformer(LightningModule):
         lr = self.hparams.learning_rate
         ws = self.hparams.warmup_steps
         if sched_name == "const":
-            if ws == 0:  # TODO Ugly crutch
-                return optimizer
             scheduler = {
                 "scheduler": optim.lr_scheduler.LambdaLR(
                     optimizer,
-                    ConstantLRSchedule(lr, ws)  # TODO does not work idk
+                    ConstantLRSchedule(lr, ws)
                 ),
                 "name": "Constant LR scheduler",
                 "interval": "step",
