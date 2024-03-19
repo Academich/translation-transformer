@@ -30,7 +30,7 @@ class VanillaTextTranslationTransformer(LightningModule):
                  eos_token_idx: int = 2,
 
                  learning_rate: float = 0.1,  # Optimization arguments
-                 warmup_steps: int = 200,
+                 warmup_steps: int | None = None,
 
                  generation: str = "beam_search",  # Prediction generation arguments
                  beam_size: int = 1,
@@ -155,10 +155,11 @@ class VanillaTextTranslationTransformer(LightningModule):
         return generated
 
     def configure_optimizers(self):
-        # TODO add an option to have no schedulers
+        optimizer = optim.Adam(self.parameters(), lr=self.hparams.learning_rate)
+        if self.hparams.warmup_steps is None:
+            return optimizer
+
         d = self.model.emb_dim
-        optimizer = optim.Adam(self.parameters(),
-                               lr=self.hparams.learning_rate)
         scheduler = {
             "scheduler": optim.lr_scheduler.LambdaLR(
                 optimizer,
