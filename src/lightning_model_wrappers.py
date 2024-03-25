@@ -1,5 +1,4 @@
-from typing import Optional, List, Any, Type
-import json
+from typing import Any
 
 import torch
 from torch import nn
@@ -8,24 +7,13 @@ from torch import optim
 from pytorch_lightning import LightningModule
 from pytorch_lightning.utilities.types import STEP_OUTPUT
 
-from models import VanillaTransformer
 from translators import TranslationInferenceBeamSearch, TranslationInferenceGreedy
 from utils import NoamLRSchedule, ConstantLRSchedule, calc_token_acc, calc_sequence_acc
 
 
-class VanillaTextTranslationTransformer(LightningModule):
+class TranslationModel(LightningModule):
 
     def __init__(self,
-                 src_vocab_size: int | None = None,  # Model size and architecture arguments
-                 tgt_vocab_size: int | None = None,
-                 embedding_dim: int = 128,
-                 feedforward_dim: int = 256,
-                 num_encoder_layers: int = 3,
-                 num_decoder_layers: int = 3,
-                 num_heads: int = 4,
-                 dropout_rate: float = 0.0,
-                 activation: str = "relu",
-
                  pad_token_idx: int = 0,  # Service token indices
                  bos_token_idx: int = 1,
                  eos_token_idx: int = 2,
@@ -41,38 +29,49 @@ class VanillaTextTranslationTransformer(LightningModule):
                  ):
         super().__init__()
         self.save_hyperparameters()
+        self.criterion = nn.CrossEntropyLoss(reduction="mean")
+
+        self.model: nn.Module | None = None
         self._create_model()
+        assert self.model is not None, \
+            f"Override the _create_model method in {self.__class__} to assign an nn.Module to self.model"
+
         self._create_generator()
 
         self.validation_step_outputs = []
 
     def _create_model(self):
-        self.model = VanillaTransformer(self.hparams.src_vocab_size,
-                                        self.hparams.tgt_vocab_size,
-                                        self.hparams.num_encoder_layers,
-                                        self.hparams.num_decoder_layers,
-                                        self.hparams.embedding_dim,
-                                        self.hparams.num_heads,
-                                        self.hparams.feedforward_dim,
-                                        self.hparams.dropout_rate,
-                                        self.hparams.activation,
-                                        self.hparams.pad_token_idx)
-        self.model.create()
-        self.criterion = nn.CrossEntropyLoss(reduction="mean")
+        raise NotImplementedError
 
     def _create_generator(self):
-        self.generator = TranslationInferenceBeamSearch(self.model,
-                                                        self.hparams.beam_size,
+        if self.hparams.generation == "beam_search":
+            self.generator = TranslationInferenceBeamSearch(self.model,
+                                                            self.hparams.beam_size,
+                                                            self.hparams.max_len,
+                                                            self.hparams.pad_token_idx,
+                                                            self.hparams.bos_token_idx,
+                                                            self.hparams.eos_token_idx)
+        elif self.hparams.generation == "greedy":
+            self.generator = TranslationInferenceGreedy(self.model,
                                                         self.hparams.max_len,
                                                         self.hparams.pad_token_idx,
                                                         self.hparams.bos_token_idx,
                                                         self.hparams.eos_token_idx)
+        else:
+            raise ValueError(
+                f'Unknown generation option {self.hparams.generation}. Options are "beam_search", "greedy".')
 
-    def forward(self, *args: Any, **kwargs: Any) -> Any:
-        return self.model(*args, **kwargs)
+    def forward(self, source_tokens: torch.LongTensor, target_tokens: torch.LongTensor) -> torch.Tensor:
+        """
+        The model receives source token indices and target token indices.
+        The output is the predicted next token probability distribution,
+        a tensor of shape BATCH_SIZE x SEQUENCE_LENGTH x TARGET_VOCABULARY_SIZE
+        """
+        return self.model(source_tokens, target_tokens)
 
     def _calc_loss(self, logits, tgt_ids):
-        return self.criterion(logits.reshape(-1, self.hparams.tgt_vocab_size),
+        _, _, tgt_vocab_size = logits.size()
+        return self.criterion(logits.reshape(-1, tgt_vocab_size),
                               tgt_ids.reshape(-1))
 
     def training_step(self, batch, batch_idx) -> STEP_OUTPUT:
@@ -113,7 +112,7 @@ class VanillaTextTranslationTransformer(LightningModule):
         self.log(f"val/acc_sequence", sequence_acc, on_step=False, on_epoch=True, prog_bar=False)
         self.validation_step_outputs.append({"pred_tokens": pred_tokens, "target_ahead": target_future})
 
-    def test_step(self, batch, batch_idx) -> Optional[STEP_OUTPUT]:
+    def test_step(self, batch, batch_idx) -> STEP_OUTPUT | None:
         source, target = batch
 
         target_behind = target[:, :-1]
@@ -151,10 +150,11 @@ class VanillaTextTranslationTransformer(LightningModule):
                 "frequency": 1,
             }
         elif sched_name == "noam":
+            d = self.model.embedding_dim  # May fail if the model does not have an 'embedding_dim' attribute
             scheduler = {
                 "scheduler": optim.lr_scheduler.LambdaLR(
                     optimizer,
-                    NoamLRSchedule(self.hparams.embedding_dim, lr, ws)
+                    NoamLRSchedule(d, lr, ws)
                 ),
                 "name": "Noam scheduler",
                 "interval": "step",

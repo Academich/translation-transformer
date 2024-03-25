@@ -2,7 +2,7 @@ from pathlib import Path
 
 from pytorch_lightning.cli import LightningCLI
 
-from lightning_model_wrappers import VanillaTextTranslationTransformer
+from models.vanilla_transformer import VanillaTextTranslationTransformer
 from data_wrappers import Seq2SeqDM
 from synthetic_tasks.copy_sequence.tokenizer import AsciiTokenizer
 
