@@ -2,7 +2,7 @@ from pathlib import Path
 
 from pytorch_lightning.cli import LightningCLI
 
-from models.vanilla_transformer import VanillaTextTranslationTransformer
+from models.vanilla_transformer import VanillaTransformerTranslationLightningModule
 from data_wrappers import Seq2SeqDM
 from synthetic_tasks.copy_sequence.tokenizer import AsciiTokenizer
 
@@ -107,7 +107,7 @@ class FlexibleCLI(LightningCLI):
 
 if __name__ == '__main__':
     cli = FlexibleCLI(
-        model_class=VanillaTextTranslationTransformer,
+        model_class=VanillaTransformerTranslationLightningModule,
         datamodule_class=Seq2SeqDM,
         run=False,
         save_config_callback=None,

@@ -2,7 +2,7 @@ from models.vanilla_transformer import VanillaTransformer
 from lightning_model_wrappers import TranslationModel
 
 
-class VanillaTextTranslationTransformer(TranslationModel):
+class VanillaTransformerTranslationLightningModule(TranslationModel):
 
     def __init__(self,
                  src_vocab_size: int | None = None,  # Model size and architecture arguments
