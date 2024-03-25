@@ -91,8 +91,8 @@ class FlexibleCLI(LightningCLI):
                 auto_insert_metric_name=False,
                 filename='step={step}-val_tok_acc={val/acc_single_tok:.3f}-val_l={val/loss:.3f}',
                 mode='min',
-                save_last=False,
-                save_top_k=2,
+                save_last=True,
+                save_top_k=1,
                 every_n_epochs=1,
                 save_on_train_epoch_end=False,
                 enable_version_counter=False
