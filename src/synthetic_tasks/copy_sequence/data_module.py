@@ -11,7 +11,7 @@ from synthetic_tasks.copy_sequence.tokenizer import AsciiTokenizer
 from data_wrappers import Seq2SeqDataset
 
 
-class CopySequence(LightningDataModule):
+class CopySequenceDM(LightningDataModule):
     def __init__(self,
                  data_dir: str | None = None,
                  src_tokenizer: Any | None = None,

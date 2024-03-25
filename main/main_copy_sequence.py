@@ -4,7 +4,7 @@ from pathlib import Path
 from pytorch_lightning.cli import LightningCLI
 
 from lightning_model_wrappers import VanillaTextTranslationTransformer
-from synthetic_tasks.copy_sequence.data_module import CopySequence
+from synthetic_tasks.copy_sequence.data_module import CopySequenceDM
 from synthetic_tasks.copy_sequence.tokenizer import AsciiTokenizer
 
 from callbacks import PredictionWriter, DecodingCallback
@@ -95,7 +95,7 @@ class FlexibleCLI(LightningCLI):
 if __name__ == '__main__':
     cli = FlexibleCLI(
         model_class=VanillaTextTranslationTransformer,
-        datamodule_class=CopySequence,
+        datamodule_class=CopySequenceDM,
         run=False,
         save_config_callback=None,
     )
