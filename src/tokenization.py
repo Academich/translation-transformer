@@ -52,7 +52,7 @@ class GenericTokenizer:
 
     def save_vocab(self, voc_save_path: Path | str) -> None:
         with open(voc_save_path, "w") as f:
-            json.dump(self.decoder_dict, f)
+            json.dump(self.decoder_dict, f, sort_keys=True)
 
     def load_vocab(self, voc_load_path: Path | str) -> None:
         """
