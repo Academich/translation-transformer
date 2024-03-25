@@ -8,6 +8,7 @@ from synthetic_tasks.copy_sequence.data_module import CopySequenceDM
 from synthetic_tasks.copy_sequence.tokenizer import AsciiTokenizer
 
 from callbacks import PredictionWriter, DecodingCallback
+from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 
 
 class FlexibleCLI(LightningCLI):
@@ -81,9 +82,22 @@ class FlexibleCLI(LightningCLI):
 
         # Creating callbacks
         if self.config.write_predictions_path is None:
-            self.config.write_predictions_path = "results/predictions.csv"
-        cb_list = [PredictionWriter(self.config.write_predictions_path, tgt_tokenizer),
-                   DecodingCallback(tgt_tokenizer)]
+            self.config.write_predictions_path = "results/copy_sequence_predictions.csv"
+        cb_list = [
+            PredictionWriter(self.config.write_predictions_path, tgt_tokenizer),
+            DecodingCallback(tgt_tokenizer),
+            LearningRateMonitor(logging_interval='step'),
+            ModelCheckpoint(
+                monitor="val/acc_single_tok",
+                auto_insert_metric_name=False,
+                filename='step={step}-val_tok_acc={val/acc_single_tok:.3f}-val_l={val/loss:.3f}',
+                mode='min',
+                save_last=False,
+                save_top_k=2,
+                every_n_epochs=1,
+                save_on_train_epoch_end=False,
+                enable_version_counter=False
+            )]
 
         # Connecting callbacks to the trainer instance
         if self.config.trainer.callbacks is None:
