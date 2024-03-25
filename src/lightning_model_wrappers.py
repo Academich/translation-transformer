@@ -61,13 +61,14 @@ class TranslationModel(LightningModule):
             raise ValueError(
                 f'Unknown generation option {self.hparams.generation}. Options are "beam_search", "greedy".')
 
-    def forward(self, source_tokens: torch.LongTensor, target_tokens: torch.LongTensor) -> torch.Tensor:
+    def forward(self, batch: dict[str, torch.Tensor]) -> torch.Tensor:
         """
-        The model receives source token indices and target token indices.
+        The model receives source token indices and target token indices,
+        and possibly some masks or any other necessary information.
         The output is the predicted next token probability distribution,
         a tensor of shape BATCH_SIZE x SEQUENCE_LENGTH x TARGET_VOCABULARY_SIZE
         """
-        return self.model(source_tokens, target_tokens)
+        raise NotImplementedError
 
     def _calc_loss(self, logits, tgt_ids):
         _, _, tgt_vocab_size = logits.size()
@@ -75,12 +76,11 @@ class TranslationModel(LightningModule):
                               tgt_ids.reshape(-1))
 
     def training_step(self, batch, batch_idx) -> STEP_OUTPUT:
-        source, target = batch
+        pred_logits = self.__call__(batch)
 
         # We predict the next token given the previous ones
-        target_given = target[:, :-1]
-        target_future = target[:, 1:]
-        pred_logits = self.__call__(source, target_given)
+        target_future = batch["tgt_tokens"][:, 1:]
+
         loss = self._calc_loss(pred_logits, target_future)
 
         pred_tokens = torch.argmax(pred_logits, dim=2)
@@ -95,11 +95,10 @@ class TranslationModel(LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        source, target = batch
+        pred_logits = self.__call__(batch)
 
-        target_given = target[:, :-1]
-        target_future = target[:, 1:]
-        pred_logits = self.__call__(source, target_given)
+        # We predict the next token given the previous ones
+        target_future = batch["tgt_tokens"][:, 1:]
 
         loss = self._calc_loss(pred_logits, target_future)
 
@@ -113,20 +112,19 @@ class TranslationModel(LightningModule):
         self.validation_step_outputs.append({"pred_tokens": pred_tokens, "target_ahead": target_future})
 
     def test_step(self, batch, batch_idx) -> STEP_OUTPUT | None:
-        source, target = batch
+        pred_logits = self.__call__(batch)
 
-        target_behind = target[:, :-1]
-        target_ahead = target[:, 1:]
-        pred_logits = self(source, target_behind)
+        source = batch["src_tokens"]
+        target = batch["tgt_tokens"]
+        target_future = batch["tgt_tokens"][:, 1:]
 
-        test_loss = self.criterion(pred_logits.reshape(-1, self.hparams.tgt_vocab_size),
-                                   target_ahead.reshape(-1))
-        self.log(f"test/loss", test_loss, on_step=False, on_epoch=True, reduce_fx='mean')
+        loss = self._calc_loss(pred_logits, target_future)
+        self.log(f"test/loss", loss, on_step=False, on_epoch=True)
 
         return {"source_token_ids": source, "pred_logits": pred_logits, "target_token_ids": target}
 
     def predict_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> Any:
-        source, _ = batch
+        source = batch["src_tokens"]
         generated = self.generator.generate(source, n_best=self.hparams.beam_size)
         return generated
 

@@ -73,14 +73,14 @@ class Seq2SeqDM(LightningDataModule):
         tgt_tokens = [torch.tensor(i).long() for i in tgt_tokens]
         return src_tokens, tgt_tokens
 
-    def collate_fn(self, batch: list[tuple[str, str]]) -> tuple[torch.Tensor, torch.Tensor]:
+    def collate_fn(self, batch: list[tuple[str, str]]) -> dict[str, torch.Tensor]:
         src_strings, tgt_strings = zip(*batch)
         src_tokens, tgt_tokens = self._prepare_tokens(src_strings, tgt_strings)
         src_tokens = pad_sequence(src_tokens,
                                   padding_value=self.src_tokenizer.pad_token_idx, batch_first=True)
         tgt_tokens = pad_sequence(tgt_tokens,
                                   padding_value=self.tgt_tokenizer.pad_token_idx, batch_first=True)
-        return src_tokens, tgt_tokens
+        return {"src_tokens": src_tokens, "tgt_tokens": tgt_tokens}
 
     def train_dataloader(self):
         return DataLoader(self.train,

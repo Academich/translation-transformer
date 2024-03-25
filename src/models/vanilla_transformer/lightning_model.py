@@ -1,3 +1,5 @@
+from torch import Tensor
+
 from models.vanilla_transformer import VanillaTransformer
 from lightning_model_wrappers import TranslationModel
 
@@ -19,7 +21,7 @@ class VanillaTransformerTranslationLightningModule(TranslationModel):
                  ):
         super().__init__(**kwargs)
 
-    def _create_model(self):
+    def _create_model(self) -> None:
         self.model = VanillaTransformer(self.hparams.src_vocab_size,
                                         self.hparams.tgt_vocab_size,
                                         self.hparams.num_encoder_layers,
@@ -31,3 +33,9 @@ class VanillaTransformerTranslationLightningModule(TranslationModel):
                                         self.hparams.activation,
                                         self.hparams.pad_token_idx)
         self.model.create()
+
+    def forward(self, batch: dict[str, Tensor]) -> Tensor:
+        source_tokens = batch["src_tokens"]
+        target_tokens = batch["tgt_tokens"]
+        target_given = target_tokens[:, :-1]
+        return self.model(source_tokens, target_given)
