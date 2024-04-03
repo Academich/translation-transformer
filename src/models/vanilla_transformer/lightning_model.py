@@ -16,6 +16,7 @@ class VanillaTransformerTranslationLightningModule(TranslationModel):
                  num_heads: int = 4,
                  dropout_rate: float = 0.0,
                  activation: str = "relu",
+                 share_embeddings: bool = False,
 
                  **kwargs  # Default arguments of the base class
                  ):
@@ -31,6 +32,7 @@ class VanillaTransformerTranslationLightningModule(TranslationModel):
                                         self.hparams.feedforward_dim,
                                         self.hparams.dropout_rate,
                                         self.hparams.activation,
+                                        self.hparams.share_embeddings,
                                         self.hparams.pad_token_idx)
         self.model.create()
 

@@ -2,7 +2,7 @@ from pathlib import Path
 
 from pytorch_lightning.cli import LightningCLI
 
-from lightning_model_wrappers import VanillaTextTranslationTransformer
+from models.vanilla_transformer import VanillaTransformerTranslationLightningModule
 from data_wrappers import Seq2SeqDM
 from tasks.reaction_prediction.tokenizer import ChemSMILESTokenizer
 
@@ -114,7 +114,7 @@ class FlexibleCLI(LightningCLI):
 
 if __name__ == '__main__':
     cli = FlexibleCLI(
-        model_class=VanillaTextTranslationTransformer,
+        model_class=VanillaTransformerTranslationLightningModule,
         datamodule_class=Seq2SeqDM,
         run=False,
         save_config_callback=None,

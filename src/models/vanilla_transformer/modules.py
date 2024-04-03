@@ -18,6 +18,7 @@ class VanillaTransformer(nn.Module):
                  feedforward_dim: int = 256,
                  dropout_rate: float = 0.0,
                  activation: str = "relu",
+                 share_embeddings: bool = False,
                  pad_token_idx: int = 0
                  ):
         super().__init__()
@@ -32,14 +33,18 @@ class VanillaTransformer(nn.Module):
         self.ff_dim = feedforward_dim
         self.dropout_rate = dropout_rate
         self.activation = activation
+        self.share_embeddings = share_embeddings
 
     def create(self):
         # Embedding constructor
         self.src_token_featurizer = TokenEmbedding(self.src_vocab_size,
                                                    self.emb_dim, padding_idx=self.pad_token_idx)
-
-        self.tgt_token_featurizer = TokenEmbedding(self.tgt_vocab_size,
-                                                   self.emb_dim, padding_idx=self.pad_token_idx)
+        if self.share_embeddings:
+            self.tgt_token_featurizer = self.src_token_featurizer
+            assert self.src_vocab_size == self.tgt_vocab_size
+        else:
+            self.tgt_token_featurizer = TokenEmbedding(self.tgt_vocab_size,
+                                                       self.emb_dim, padding_idx=self.pad_token_idx)
 
         self.positional_encoding = PositionalEncoding(self.emb_dim)
 
