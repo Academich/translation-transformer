@@ -2,8 +2,8 @@ from pathlib import Path
 
 from pytorch_lightning.cli import LightningCLI
 
-from models.vanilla_transformer import VanillaTransformerTranslationLightningModule
-from data_wrappers import Seq2SeqDM
+from models.mamba_minimal.lightning_model import EncoderDecoderMambaNaiveTranslationLightningModule
+from models.mamba_minimal.data_module import Seq2SeqWithEncDecMambaNaiveDM
 from synthetic_tasks.copy_sequence.tokenizer import AsciiTokenizer
 
 from callbacks import PredictionWriter, DecodingCallback
@@ -107,8 +107,8 @@ class FlexibleCLI(LightningCLI):
 
 if __name__ == '__main__':
     cli = FlexibleCLI(
-        model_class=VanillaTransformerTranslationLightningModule,
-        datamodule_class=Seq2SeqDM,
+        model_class=EncoderDecoderMambaNaiveTranslationLightningModule,
+        datamodule_class=Seq2SeqWithEncDecMambaNaiveDM,
         run=False,
         save_config_callback=None,
     )
