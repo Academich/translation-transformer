@@ -148,7 +148,7 @@ class TranslationModel(LightningModule):
                 "frequency": 1,
             }
         elif sched_name == "noam":
-            d = self.model.embedding_dim  # May fail if the model does not have an 'embedding_dim' attribute
+            d = self.model.emb_dim  # May fail if the model does not have an 'emb_dim' attribute
             scheduler = {
                 "scheduler": optim.lr_scheduler.LambdaLR(
                     optimizer,
