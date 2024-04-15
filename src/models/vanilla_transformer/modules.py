@@ -1,6 +1,4 @@
-from typing import Tuple
-
-from torch import LongTensor, Tensor
+from torch import LongTensor, BoolTensor
 from torch import nn
 
 from models.embeddings import TokenEmbedding, PositionalEncoding
@@ -62,36 +60,24 @@ class VanillaTransformer(nn.Module):
         # Decision function
         self.next_token_classifier = nn.Linear(self.emb_dim, self.tgt_vocab_size)
 
-    def _featurize(self, src: LongTensor, tgt: LongTensor) -> Tuple[Tensor, Tensor]:
+    def forward(self, src: LongTensor, tgt: LongTensor, src_pad_mask: BoolTensor, tgt_pad_mask: BoolTensor):
+        _, tgt_seq_len = tgt.size()
+
+        # Embed tokens
         src_emb = self.positional_encoding(self.src_token_featurizer(src))
         tgt_emb = self.positional_encoding(self.tgt_token_featurizer(tgt))
-        return src_emb, tgt_emb
 
-    def _update_embeddings(self,
-                           src_emb: Tensor,
-                           tgt_emb: Tensor,
-                           src: LongTensor,
-                           tgt: LongTensor) -> Tensor:
-        _, tgt_seq_len, _ = tgt_emb.size()
+        # Update embeddings
         tgt_mask = self.transformer.generate_square_subsequent_mask(tgt_seq_len).type_as(tgt_emb)
-        src_pad_mask = (src == self.pad_token_idx).bool()
-        tgt_pad_mask = (tgt == self.pad_token_idx).bool()
+        tgt_emb = self.transformer(src_emb,
+                                   tgt_emb,
+                                   src_mask=None,
+                                   tgt_mask=tgt_mask,
+                                   memory_mask=None,
+                                   src_key_padding_mask=src_pad_mask,
+                                   tgt_key_padding_mask=tgt_pad_mask,
+                                   memory_key_padding_mask=src_pad_mask)
 
-        target_token_updated_emb = self.transformer(src_emb,
-                                                    tgt_emb,
-                                                    src_mask=None,
-                                                    tgt_mask=tgt_mask,
-                                                    memory_mask=None,
-                                                    src_key_padding_mask=src_pad_mask,
-                                                    tgt_key_padding_mask=tgt_pad_mask,
-                                                    memory_key_padding_mask=src_pad_mask)
-        return target_token_updated_emb
-
-    def _decision(self, tgt_emb: Tensor) -> Tensor:
+        # Propose the next token
         logits = self.next_token_classifier(tgt_emb)
         return logits
-
-    def forward(self, src: LongTensor, tgt: LongTensor):
-        src_emb, tgt_emb = self._featurize(src, tgt)
-        upd_tgt_emb = self._update_embeddings(src_emb, tgt_emb, src, tgt)
-        return self._decision(upd_tgt_emb)
