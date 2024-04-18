@@ -38,5 +38,4 @@ class MambaTransformerTranslationLightningModule(TranslationModel):
 
     def forward(self, batch: dict[str, Tensor]) -> Tensor:
         return self.model(batch["src_tokens"],
-                          batch["tgt_tokens"][:, :-1],
-                          batch["src_pad_mask"])
+                          batch["tgt_tokens"][:, :-1])

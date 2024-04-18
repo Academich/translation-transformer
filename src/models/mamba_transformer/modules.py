@@ -194,7 +194,10 @@ class TransformerEncMambaTransformerDec(nn.Module):
         # Decision function
         self.next_token_classifier = nn.Linear(self.emb_dim, self.tgt_vocab_size)
 
-    def forward(self, src: LongTensor, tgt: LongTensor, src_pad_mask: BoolTensor):
+    def generate_pad_mask(self, tokens: LongTensor) -> BoolTensor:
+        return (tokens == self.pad_token_idx).bool()
+
+    def forward(self, src: LongTensor, tgt: LongTensor):
         _, tgt_seq_len = tgt.size()
 
         # Embed tokens
@@ -202,6 +205,7 @@ class TransformerEncMambaTransformerDec(nn.Module):
         tgt_emb = self.positional_encoding(self.tgt_token_featurizer(tgt))
 
         # Update embeddings
+        src_pad_mask = self.generate_pad_mask(src)
         memory = self.encoder(src_emb, src_key_padding_mask=src_pad_mask)
         for dec_layer in self.decoder:
             tgt_emb = dec_layer(tgt_emb, memory,
