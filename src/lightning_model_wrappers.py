@@ -111,7 +111,7 @@ class TranslationModel(LightningModule):
         self.log(f"val/acc_sequence", sequence_acc, on_step=False, on_epoch=True, prog_bar=False)
         self.validation_step_outputs.append({"pred_tokens": pred_tokens, "target_ahead": target_future})
 
-    def test_step(self, batch, batch_idx) -> STEP_OUTPUT | None:
+    def test_step(self, batch, batch_idx) -> STEP_OUTPUT:
         pred_logits = self.__call__(batch)
 
         source = batch["src_tokens"]
@@ -119,7 +119,13 @@ class TranslationModel(LightningModule):
         target_future = batch["tgt_tokens"][:, 1:]
 
         loss = self._calc_loss(pred_logits, target_future)
-        self.log(f"test/loss", loss, on_step=False, on_epoch=True)
+        pred_tokens = torch.argmax(pred_logits, dim=2)
+        token_acc = calc_token_acc(pred_tokens, target_future)
+        sequence_acc = calc_sequence_acc(pred_tokens, target_future, self.hparams.eos_token_idx)
+
+        self.log(f"test/loss", loss, on_step=False, on_epoch=True, prog_bar=True)
+        self.log(f"test/acc_single_tok", token_acc, on_step=False, on_epoch=True, prog_bar=False)
+        self.log(f"test/acc_sequence", sequence_acc, on_step=False, on_epoch=True, prog_bar=False)
 
         return {"source_token_ids": source, "pred_logits": pred_logits, "target_token_ids": target}
 
