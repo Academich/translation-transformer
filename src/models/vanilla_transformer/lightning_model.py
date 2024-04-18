@@ -1,6 +1,6 @@
 from torch import Tensor
 
-from models.vanilla_transformer import VanillaTransformer
+from models.vanilla_transformer.modules import VanillaTransformer
 from lightning_model_wrappers import TranslationModel
 
 
