@@ -1,5 +1,8 @@
 from pathlib import Path
-from pytorch_lightning import Callback
+from typing import Any
+
+from pytorch_lightning import Callback, Trainer, LightningModule
+from pytorch_lightning.utilities.types import STEP_OUTPUT
 from pytorch_lightning.callbacks import BasePredictionWriter
 
 
@@ -48,8 +51,7 @@ class PredictionWriter(BasePredictionWriter):
             self, trainer, pl_module, prediction, batch_indices, batch, batch_idx, dataloader_idx
     ):
         with open(self.output_path, "a") as f:
-            _, tgt = batch
-            tgt = tgt.cpu().numpy()
+            tgt = batch["tgt_tokens"].cpu().numpy()
             pred = prediction.cpu().numpy()
             for i, t in enumerate(tgt):
                 t_string = self.tkz.decode(t)
