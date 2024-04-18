@@ -38,6 +38,4 @@ class VanillaTransformerTranslationLightningModule(TranslationModel):
 
     def forward(self, batch: dict[str, Tensor]) -> Tensor:
         return self.model(batch["src_tokens"],
-                          batch["tgt_tokens"][:, :-1],
-                          batch["src_pad_mask"],
-                          batch["tgt_pad_mask"][:, :-1])
+                          batch["tgt_tokens"][:, :-1])
