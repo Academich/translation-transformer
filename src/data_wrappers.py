@@ -31,6 +31,7 @@ class Seq2SeqDM(LightningDataModule):
                  tgt_tokenizer: Any | None = None,
                  batch_size: int = 1,
                  num_workers: int = 0,
+                 persistent_workers=False,
                  shuffle_train: bool = False):
         super().__init__()
 
@@ -48,6 +49,7 @@ class Seq2SeqDM(LightningDataModule):
         self.batch_size = batch_size
         self.shuffle_train = shuffle_train
         self.num_workers = num_workers
+        self.persistent_workers = persistent_workers
 
     def setup(self, stage: str | None = None) -> None:
         if stage == "fit" or stage is None:
@@ -92,6 +94,7 @@ class Seq2SeqDM(LightningDataModule):
                           batch_size=self.batch_size,
                           num_workers=self.num_workers,
                           collate_fn=self.collate_fn,
+                          persistent_workers=self.persistent_workers,
                           shuffle=self.shuffle_train)
 
     def val_dataloader(self):
@@ -99,6 +102,7 @@ class Seq2SeqDM(LightningDataModule):
                           batch_size=self.batch_size,
                           num_workers=self.num_workers,
                           collate_fn=self.collate_fn,
+                          persistent_workers=self.persistent_workers,
                           shuffle=False)
 
     def test_dataloader(self):
@@ -106,6 +110,7 @@ class Seq2SeqDM(LightningDataModule):
                           batch_size=self.batch_size,
                           num_workers=self.num_workers,
                           collate_fn=self.collate_fn,
+                          persistent_workers=self.persistent_workers,
                           shuffle=False)
 
     def predict_dataloader(self):
@@ -113,4 +118,5 @@ class Seq2SeqDM(LightningDataModule):
                           batch_size=self.batch_size,
                           num_workers=self.num_workers,
                           collate_fn=self.collate_fn,
+                          persistent_workers=self.persistent_workers,
                           shuffle=False)
