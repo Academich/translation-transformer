@@ -2,7 +2,8 @@ from pathlib import Path
 
 from pytorch_lightning.cli import LightningCLI
 
-from models import VanillaTransformerTranslationLightningModule, TransformerEncMambaTransformerDecTranslationLightningModule
+from models import VanillaTransformerTranslationLightningModule, \
+    TransformerEncMambaTransformerDecTranslationLightningModule
 from data_wrappers import Seq2SeqDM
 from tasks.reaction_prediction.tokenizer import ChemSMILESTokenizer
 
@@ -70,7 +71,7 @@ class FlexibleCLI(LightningCLI):
 
         # Merging source and target tokenizer vocabularies
         print("Merging source and target tokenizer vocabularies...")
-        merged_enc_dict = {**tgt_tokenizer.encoder_dict, **src_tokenizer.encoder_dict}
+        merged_enc_dict = src_tokenizer.encoder_dict  # TODO UGLY
         merged_tokenizer = ChemSMILESTokenizer()
         merged_tokenizer.assign_vocab(merged_enc_dict)
         save_vocab_dir = data_dir / "vocabs"
@@ -78,13 +79,14 @@ class FlexibleCLI(LightningCLI):
         merged_tokenizer.save_vocab(save_vocab_dir / "vocab.json")
 
         # Connecting the tokenizers to the model and the data module
+        # TODO UGLY
         self.config.data.src_tokenizer = merged_tokenizer
         self.config.data.tgt_tokenizer = merged_tokenizer
-        self.config.model.src_vocab_size = merged_tokenizer.n_tokens
-        self.config.model.tgt_vocab_size = merged_tokenizer.n_tokens
-        self.config.model.pad_token_idx = merged_tokenizer.pad_token_idx
-        self.config.model.bos_token_idx = merged_tokenizer.bos_token_idx
-        self.config.model.eos_token_idx = merged_tokenizer.eos_token_idx
+        self.config.model.init_args.src_vocab_size = merged_tokenizer.n_tokens
+        self.config.model.init_args.tgt_vocab_size = merged_tokenizer.n_tokens
+        self.config.model.init_args.pad_token_idx = tgt_tokenizer.pad_token_idx
+        self.config.model.init_args.bos_token_idx = tgt_tokenizer.bos_token_idx
+        self.config.model.init_args.eos_token_idx = tgt_tokenizer.eos_token_idx
 
         # Creating callbacks
         if self.config.write_predictions_path is None:
@@ -114,7 +116,7 @@ class FlexibleCLI(LightningCLI):
 
 if __name__ == '__main__':
     cli = FlexibleCLI(
-        model_class=VanillaTransformerTranslationLightningModule,
+        model_class=None,  # the model class should be provided in the CLI
         datamodule_class=Seq2SeqDM,
         run=False,
         save_config_callback=None,

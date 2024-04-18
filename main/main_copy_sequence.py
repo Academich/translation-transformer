@@ -73,11 +73,11 @@ class FlexibleCLI(LightningCLI):
         # Connecting the tokenizers to the model and the data module
         self.config.data.src_tokenizer = src_tokenizer
         self.config.data.tgt_tokenizer = tgt_tokenizer
-        self.config.model.src_vocab_size = src_tokenizer.n_tokens
-        self.config.model.tgt_vocab_size = tgt_tokenizer.n_tokens
-        self.config.model.pad_token_idx = tgt_tokenizer.pad_token_idx
-        self.config.model.bos_token_idx = tgt_tokenizer.bos_token_idx
-        self.config.model.eos_token_idx = tgt_tokenizer.eos_token_idx
+        self.config.model.init_args.src_vocab_size = src_tokenizer.n_tokens
+        self.config.model.init_args.tgt_vocab_size = tgt_tokenizer.n_tokens
+        self.config.model.init_args.pad_token_idx = tgt_tokenizer.pad_token_idx
+        self.config.model.init_args.bos_token_idx = tgt_tokenizer.bos_token_idx
+        self.config.model.init_args.eos_token_idx = tgt_tokenizer.eos_token_idx
 
         # Creating callbacks
         if self.config.write_predictions_path is None:
@@ -107,7 +107,7 @@ class FlexibleCLI(LightningCLI):
 
 if __name__ == '__main__':
     cli = FlexibleCLI(
-        model_class=VanillaTransformerTranslationLightningModule,
+        model_class=None,  # the model class should be provided in the CLI
         datamodule_class=Seq2SeqDM,
         run=False,
         save_config_callback=None,
