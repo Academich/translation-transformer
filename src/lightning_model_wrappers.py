@@ -38,8 +38,6 @@ class TranslationModel(LightningModule):
 
         self._create_generator()
 
-        self.validation_step_outputs = []
-
     def _create_model(self):
         raise NotImplementedError
 
@@ -94,7 +92,7 @@ class TranslationModel(LightningModule):
         self.log(f"train/pads_in_batch_tgt", mean_pad_tokens_in_target, on_step=True, on_epoch=True, prog_bar=False)
         return loss
 
-    def validation_step(self, batch, batch_idx):
+    def validation_step(self, batch, batch_idx) -> STEP_OUTPUT:
         pred_logits = self.__call__(batch)
 
         # We predict the next token given the previous ones
@@ -109,7 +107,7 @@ class TranslationModel(LightningModule):
         self.log(f"val/loss", loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log(f"val/acc_single_tok", token_acc, on_step=False, on_epoch=True, prog_bar=False)
         self.log(f"val/acc_sequence", sequence_acc, on_step=False, on_epoch=True, prog_bar=False)
-        self.validation_step_outputs.append({"pred_tokens": pred_tokens, "target_ahead": target_future})
+        return {"pred_tokens": pred_tokens, "target_ahead": target_future}
 
     def test_step(self, batch, batch_idx) -> STEP_OUTPUT:
         pred_logits = self.__call__(batch)

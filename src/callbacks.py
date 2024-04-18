@@ -6,11 +6,23 @@ from pytorch_lightning.callbacks import BasePredictionWriter
 class DecodingCallback(Callback):
     def __init__(self, tgt_tokenizer):
         super().__init__()
+        self.validation_step_outputs = []
         self.tkz = tgt_tokenizer
 
-    def on_validation_epoch_end(self, trainer, pl_module) -> None:
+    def on_validation_batch_end(
+            self,
+            trainer: "Trainer",
+            pl_module: "LightningModule",
+            outputs: STEP_OUTPUT,
+            batch: Any,
+            batch_idx: int,
+            dataloader_idx: int = 0,
+    ) -> None:
+        self.validation_step_outputs.append(outputs)
+
+    def on_validation_epoch_end(self, trainer: "Trainer", pl_module: "LightningModule") -> None:
         total_correct, total = 0, 0
-        for o in pl_module.validation_step_outputs:
+        for o in self.validation_step_outputs:
             pred_tokens = o["pred_tokens"].cpu().numpy()
             target_ahead = o["target_ahead"].cpu().numpy()
             b_size = pred_tokens.shape[0]
@@ -20,7 +32,7 @@ class DecodingCallback(Callback):
                 total_correct += int(predicted_str == target_str)
                 total += 1
         trainer.logger.log_metrics({"val/whole_seq_exact_match_acc_total": total_correct / total})
-        pl_module.validation_step_outputs.clear()
+        self.validation_step_outputs.clear()
 
 
 class PredictionWriter(BasePredictionWriter):
