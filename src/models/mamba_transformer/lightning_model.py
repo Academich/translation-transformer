@@ -4,7 +4,7 @@ from models.mamba_transformer.modules import TransformerEncMambaTransformerDec
 from lightning_model_wrappers import TranslationModel
 
 
-class MambaTransformerTranslationLightningModule(TranslationModel):
+class TransformerEncMambaTransformerDecTranslationLightningModule(TranslationModel):
 
     def __init__(self,
                  src_vocab_size: int | None = None,  # Model size and architecture arguments

@@ -1,1 +1,1 @@
-from models.mamba_transformer.lightning_model import MambaTransformerTranslationLightningModule
+from models.mamba_transformer.lightning_model import TransformerEncMambaTransformerDecTranslationLightningModule
