@@ -80,14 +80,9 @@ class Seq2SeqDM(LightningDataModule):
         src_tokens, tgt_tokens = self._prepare_tokens(src_strings, tgt_strings)
         src_tokens = pad_sequence(src_tokens,
                                   padding_value=self.src_tokenizer.pad_token_idx, batch_first=True)
-        src_pad_mask = (src_tokens == self.src_tokenizer.pad_token_idx).bool()
         tgt_tokens = pad_sequence(tgt_tokens,
                                   padding_value=self.tgt_tokenizer.pad_token_idx, batch_first=True)
-        tgt_pad_mask = (tgt_tokens == self.tgt_tokenizer.pad_token_idx).bool()
-        return {"src_tokens": src_tokens,
-                "tgt_tokens": tgt_tokens,
-                "src_pad_mask": src_pad_mask,
-                "tgt_pad_mask": tgt_pad_mask}
+        return {"src_tokens": src_tokens, "tgt_tokens": tgt_tokens}
 
     def train_dataloader(self):
         return DataLoader(self.train,

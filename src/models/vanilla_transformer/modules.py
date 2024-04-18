@@ -60,7 +60,10 @@ class VanillaTransformer(nn.Module):
         # Decision function
         self.next_token_classifier = nn.Linear(self.emb_dim, self.tgt_vocab_size)
 
-    def forward(self, src: LongTensor, tgt: LongTensor, src_pad_mask: BoolTensor, tgt_pad_mask: BoolTensor):
+    def generate_pad_mask(self, tokens: LongTensor) -> BoolTensor:
+        return (tokens == self.pad_token_idx).bool()
+
+    def forward(self, src: LongTensor, tgt: LongTensor):
         _, tgt_seq_len = tgt.size()
 
         # Embed tokens
@@ -68,6 +71,8 @@ class VanillaTransformer(nn.Module):
         tgt_emb = self.positional_encoding(self.tgt_token_featurizer(tgt))
 
         # Update embeddings
+        src_pad_mask = self.generate_pad_mask(src)
+        tgt_pad_mask = self.generate_pad_mask(tgt)
         tgt_mask = self.transformer.generate_square_subsequent_mask(tgt_seq_len).type_as(tgt_emb)
         tgt_emb = self.transformer(src_emb,
                                    tgt_emb,
