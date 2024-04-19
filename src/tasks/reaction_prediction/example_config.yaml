@@ -1,9 +1,9 @@
 # pytorch_lightning==2.2.1
 seed_everything: 123456
 trainer:
-  accelerator: cpu
+  accelerator: gpu
   strategy: auto
-  devices: auto
+  devices: [0]
   num_nodes: 1
   precision: null
   logger:
@@ -51,7 +51,7 @@ trainer:
   fast_dev_run: false
   max_epochs: null
   min_epochs: null
-  max_steps: 1500
+  max_steps: 2500000
   min_steps: null
   max_time: null
   limit_train_batches: null
@@ -86,24 +86,24 @@ data:
     vocab_path: data/MIT_mixed/vocabs/vocab.json
     data_dir: data/MIT_mixed
     batch_size: 32
-    num_workers: 0
+    num_workers: 4
     persistent_workers: false
     shuffle_train: true
 model:
   class_path: models.VanillaTransformerTranslationLightningModule
   init_args:
-    embedding_dim: 128
-    feedforward_dim: 256
-    num_encoder_layers: 3
-    num_decoder_layers: 3
-    num_heads: 4
-    dropout_rate: 0.0
+    embedding_dim: 256
+    feedforward_dim: 2048
+    num_encoder_layers: 4
+    num_decoder_layers: 4
+    num_heads: 8
+    dropout_rate: 0.1
     activation: relu
-    share_embeddings: false
+    share_embeddings: true
     learning_rate: 0.0003
     weight_decay: 0.0
     scheduler: const
     warmup_steps: 0
     generation: beam_search
-    beam_size: 1
-    max_len: 100
+    beam_size: 5
+    max_len: 150
