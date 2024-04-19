@@ -62,9 +62,6 @@ class VanillaTransformer(nn.Module):
         # Decision function
         self.next_token_classifier = nn.Linear(self.emb_dim, self.tgt_vocab_size)
 
-    def generate_pad_mask(self, tokens: LongTensor) -> BoolTensor:
-        return (tokens == self.pad_token_idx).bool()
-
     def forward(self, src: LongTensor, tgt: LongTensor):
         _, tgt_seq_len = tgt.size()
 
