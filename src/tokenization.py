@@ -43,7 +43,7 @@ class GenericTokenizer:
         decoder_dict = reverse_dict(encoder_dict)
         return encoder_dict, decoder_dict
 
-    def train_tokenizer(self, train_data_path: Path | str) -> None:
+    def train_tokenizer(self, train_data: Iterable[str]) -> None:
         """
         Goes through the training data, assembles the tokenizer dictionary (str to int)
         and saves it to train_data_path

@@ -1,5 +1,5 @@
 import re
-from pathlib import Path
+from typing import Iterable
 from collections import Counter
 from itertools import chain
 
@@ -21,11 +21,8 @@ class SimpleSmilesTokenizer:
 
 class ChemSMILESTokenizer(GenericTokenizer):
 
-    def train_tokenizer(self, train_data_path: Path | str) -> None:
-        with open(train_data_path) as f:
-            train_data = [line.strip() for line in f.readlines()]
-
-        tokenized_data = [SimpleSmilesTokenizer.split_into_tokens(line,
+    def train_tokenizer(self, train_data: Iterable[str]) -> None:
+        tokenized_data = [SimpleSmilesTokenizer.split_into_tokens(line.strip(),
                                                                   check_reconstruction=True) for line in train_data]
         token_counts = Counter(chain(*tokenized_data))
 
