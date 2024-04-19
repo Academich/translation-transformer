@@ -1,12 +1,7 @@
 from pytorch_lightning.cli import LightningCLI
 
-from synthetic_tasks.copy_sequence.data_module import CopySequenceDM
 
-from callbacks import PredictionWriter, DecodingCallback
-from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
-
-
-class FlexibleCLI(LightningCLI):
+class TranslationCLI(LightningCLI):
     """
     A CLI that allows using subcommands together with run=False.
     """
@@ -17,9 +12,9 @@ class FlexibleCLI(LightningCLI):
 
 
 if __name__ == '__main__':
-    cli = FlexibleCLI(
+    cli = TranslationCLI(
         model_class=None,  # the model class should be provided in the CLI
-        datamodule_class=CopySequenceDM,
+        datamodule_class=None,  # the data module class should be provided in the CLI
         save_config_kwargs={"overwrite": True},
         run=True
     )

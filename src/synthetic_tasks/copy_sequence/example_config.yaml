@@ -11,7 +11,7 @@ trainer:
     init_args:
       save_dir: .
       name: lightning_logs
-      version: example
+      version: example_copy_sequence
       log_graph: false
       default_hp_metric: true
       prefix: ''
@@ -81,12 +81,14 @@ trainer:
   reload_dataloaders_every_n_epochs: 0
   default_root_dir: null
 data:
-  vocab_path: null
-  data_dir: data/copy_sequence
-  batch_size: 32
-  num_workers: 0
-  persistent_workers: false
-  shuffle_train: true
+  class_path: synthetic_tasks.copy_sequence.CopySequenceDM
+  init_args:
+    vocab_path: null
+    data_dir: data/copy_sequence
+    batch_size: 32
+    num_workers: 0
+    persistent_workers: false
+    shuffle_train: true
 model:
   class_path: models.VanillaTransformerTranslationLightningModule
   init_args:
