@@ -1,7 +1,6 @@
 # === Learning rate schedulers ===
 class ConstantLRSchedule:
-    def __init__(self, learning_rate: float, warmup_steps: int):
-        self.lr = learning_rate
+    def __init__(self, warmup_steps: int):
         self.ws = warmup_steps
 
     def __call__(self, i: int) -> float:
@@ -15,8 +14,7 @@ class ConstantLRSchedule:
 
 class NoamLRSchedule:
 
-    def __init__(self, emb_dim: int, learning_rate: float, warmup_steps: int):
-        self.lr = learning_rate
+    def __init__(self, emb_dim: int, warmup_steps: int):
         self.ws = warmup_steps
         self.mult = emb_dim ** -0.5
 

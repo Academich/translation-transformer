@@ -153,13 +153,12 @@ class TranslationModel(LightningModule):
                                betas=(0.9, 0.999))
 
         sched_name = self.hparams.scheduler
-        lr = self.hparams.learning_rate
         ws = self.hparams.warmup_steps
         if sched_name == "const":
             scheduler = {
                 "scheduler": optim.lr_scheduler.LambdaLR(
                     optimizer,
-                    ConstantLRSchedule(lr, ws)
+                    ConstantLRSchedule(ws)
                 ),
                 "name": "Constant LR scheduler",
                 "interval": "step",
@@ -170,7 +169,7 @@ class TranslationModel(LightningModule):
             scheduler = {
                 "scheduler": optim.lr_scheduler.LambdaLR(
                     optimizer,
-                    NoamLRSchedule(d, lr, ws)
+                    NoamLRSchedule(d, ws)
                 ),
                 "name": "Noam scheduler",
                 "interval": "step",
