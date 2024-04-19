@@ -11,7 +11,7 @@ trainer:
     init_args:
       save_dir: .
       name: lightning_logs
-      version: plug_in_model_and_dm_cb
+      version: example
       log_graph: false
       default_hp_metric: true
       prefix: ''
