@@ -146,11 +146,13 @@ class TransformerEncMambaTransformerDec(nn.Module):
                  dropout_rate: float = 0.0,
                  activation: str = "relu",
                  share_embeddings: bool = False,
-                 pad_token_idx: int = 0):
+                 src_pad_token_idx: int = 0,
+                 tgt_pad_token_idx: int = 0):
         super().__init__()
         self.src_vocab_size = src_vocab_size
         self.tgt_vocab_size = tgt_vocab_size
-        self.pad_token_idx = pad_token_idx
+        self.src_pad_token_i = src_pad_token_idx
+        self.tgt_pad_token_i = tgt_pad_token_idx
 
         self.num_enc_layers = num_encoder_layers
         self.num_dec_layers = num_decoder_layers
@@ -161,15 +163,17 @@ class TransformerEncMambaTransformerDec(nn.Module):
         self.activation = activation
         self.share_embeddings = share_embeddings
 
+        self.layer_norm_eps = 1e-5
+
     def create(self):
         self.src_token_featurizer = TokenEmbedding(self.src_vocab_size,
-                                                   self.emb_dim, padding_idx=self.pad_token_idx)
+                                                   self.emb_dim, padding_idx=self.src_pad_token_i)
         if self.share_embeddings:
             self.tgt_token_featurizer = self.src_token_featurizer
             assert self.src_vocab_size == self.tgt_vocab_size
         else:
             self.tgt_token_featurizer = TokenEmbedding(self.tgt_vocab_size,
-                                                       self.emb_dim, padding_idx=self.pad_token_idx)
+                                                       self.emb_dim, padding_idx=self.tgt_pad_token_i)
 
         self.positional_encoding = PositionalEncoding(self.emb_dim)
 
@@ -179,21 +183,28 @@ class TransformerEncMambaTransformerDec(nn.Module):
                                                                         nhead=self.num_heads,
                                                                         dim_feedforward=self.ff_dim,
                                                                         dropout=self.dropout_rate,
-                                                                        activation=self.activation, layer_norm_eps=1e-5,
-                                                                        batch_first=True, norm_first=False,
+                                                                        activation=self.activation,
+                                                                        layer_norm_eps=self.layer_norm_eps,
+                                                                        batch_first=True,
+                                                                        norm_first=False,
                                                                         bias=True),
                                              self.num_enc_layers,
                                              nn.LayerNorm(self.emb_dim, eps=1e-5, bias=True))
         self.decoder = nn.ModuleList([
-            MambaTransformerDecoderLayer(self.emb_dim, self.num_heads, batch_first=True, norm_first=True) for _ in
+            MambaTransformerDecoderLayer(d_model=self.emb_dim,
+                                         nhead=self.num_heads,
+                                         dim_feedforward=self.ff_dim,
+                                         dropout=self.dropout_rate,
+                                         activation=self.activation,
+                                         layer_norm_eps=self.layer_norm_eps,
+                                         batch_first=True,
+                                         norm_first=True,
+                                         bias=True) for _ in
             range(self.num_dec_layers)
         ])
 
         # Decision function
         self.next_token_classifier = nn.Linear(self.emb_dim, self.tgt_vocab_size)
-
-    def generate_pad_mask(self, tokens: LongTensor) -> BoolTensor:
-        return (tokens == self.pad_token_idx).bool()
 
     def forward(self, src: LongTensor, tgt: LongTensor):
         _, tgt_seq_len = tgt.size()
@@ -203,7 +214,7 @@ class TransformerEncMambaTransformerDec(nn.Module):
         tgt_emb = self.positional_encoding(self.tgt_token_featurizer(tgt))
 
         # Update embeddings
-        src_pad_mask = self.generate_pad_mask(src)
+        src_pad_mask = (src == self.src_pad_token_i).bool()
         memory = self.encoder(src_emb, src_key_padding_mask=src_pad_mask)
         for dec_layer in self.decoder:
             tgt_emb = dec_layer(tgt_emb, memory,
@@ -321,11 +332,13 @@ class MambaEncMambaTransformerDec(nn.Module):
                  dropout_rate: float = 0.0,
                  activation: str = "relu",
                  share_embeddings: bool = False,
-                 pad_token_idx: int = 0):
+                 src_pad_token_idx: int = 0,
+                 tgt_pad_token_idx: int = 0):
         super().__init__()
         self.src_vocab_size = src_vocab_size
         self.tgt_vocab_size = tgt_vocab_size
-        self.pad_token_idx = pad_token_idx
+        self.src_pad_token_i = src_pad_token_idx
+        self.tgt_pad_token_i = tgt_pad_token_idx
 
         self.num_enc_layers = num_encoder_layers
         self.num_dec_layers = num_decoder_layers
@@ -336,34 +349,41 @@ class MambaEncMambaTransformerDec(nn.Module):
         self.activation = activation
         self.share_embeddings = share_embeddings
 
+        self.layer_norm_eps = 1e-5
+
     def create(self):
         self.src_token_featurizer = TokenEmbedding(self.src_vocab_size,
-                                                   self.emb_dim, padding_idx=self.pad_token_idx)
+                                                   self.emb_dim, padding_idx=self.src_pad_token_i)
         if self.share_embeddings:
             self.tgt_token_featurizer = self.src_token_featurizer
             assert self.src_vocab_size == self.tgt_vocab_size
         else:
             self.tgt_token_featurizer = TokenEmbedding(self.tgt_vocab_size,
-                                                       self.emb_dim, padding_idx=self.pad_token_idx)
+                                                       self.emb_dim, padding_idx=self.tgt_pad_token_i)
 
         # Embedding updater
-        self.encoder = BidirMambaEncoder(self.emb_dim, self.num_enc_layers, self.pad_token_idx)
+        self.encoder = BidirMambaEncoder(self.emb_dim, self.num_enc_layers, self.src_pad_token_i)
 
         self.decoder = nn.ModuleList([
-            MambaTransformerDecoderLayer(self.emb_dim, self.num_heads, batch_first=True, norm_first=True) for _ in
+            MambaTransformerDecoderLayer(d_model=self.emb_dim,
+                                         nhead=self.num_heads,
+                                         dim_feedforward=self.ff_dim,
+                                         dropout=self.dropout_rate,
+                                         activation=self.activation,
+                                         layer_norm_eps=self.layer_norm_eps,
+                                         batch_first=True,
+                                         norm_first=True,
+                                         bias=True) for _ in
             range(self.num_dec_layers)
         ])
 
         # Decision function
         self.next_token_classifier = nn.Linear(self.emb_dim, self.tgt_vocab_size)
 
-    def generate_pad_mask(self, tokens: LongTensor) -> BoolTensor:
-        return (tokens == self.pad_token_idx).bool()
-
     def flip_keep_pad(self, arr):
         # TODO You should flip 3d embeddings, not 2d sequences
         dim_indices = torch.arange(arr.shape[1]).type_as(arr).long().repeat(arr.shape[0]).reshape(arr.shape[0], -1)
-        eos_index = (arr == self.pad_token_idx).sum(1)
+        eos_index = (arr == self.src_pad_token_i).sum(1)
         indices = (dim_indices - eos_index.unsqueeze(1)) % arr.shape[1]
         return torch.flip(torch.gather(arr, dim=1, index=indices), [1])
 
@@ -377,7 +397,7 @@ class MambaEncMambaTransformerDec(nn.Module):
         tgt_emb = self.tgt_token_featurizer(tgt)
 
         # Update embeddings
-        src_pad_mask = self.generate_pad_mask(src)
+        src_pad_mask = (src == self.src_pad_token_i).bool()
         memory = self.encoder(src_emb, src_flipped_emb)
         for dec_layer in self.decoder:
             tgt_emb = dec_layer(tgt_emb, memory,
