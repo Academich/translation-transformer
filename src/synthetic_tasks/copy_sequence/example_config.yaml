@@ -83,7 +83,7 @@ trainer:
 data:
   class_path: synthetic_tasks.copy_sequence.CopySequenceDM
   init_args:
-    vocab_path: null
+    vocab_path: data/copy_sequence/vocabs/vocab.json
     data_dir: data/copy_sequence
     batch_size: 32
     num_workers: 0

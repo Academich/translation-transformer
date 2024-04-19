@@ -6,22 +6,25 @@ from synthetic_tasks.copy_sequence.tokenizer import AsciiTokenizer
 
 class CopySequenceDM(Seq2SeqDM):
 
-    def __init__(self, vocab_path=None, *args, **kwargs):
+    def __init__(self, vocab_path: str | None = None, *args, **kwargs):
         self.vocab_path = vocab_path
         super().__init__(*args, **kwargs)
 
     def create_tokenizers(self):
-        tokenizer = AsciiTokenizer()
-        if self.vocab_path is not None:
-            print(f"Loading tokenizer vocabulary from {self.vocab_path}...")
-            tokenizer.load_vocab(self.vocab_path)
-            return tokenizer, tokenizer
+        if self.vocab_path is None:
+            self.vocab_path = self.data_dir / "vocabs" / "vocab.json"
+        else:
+            self.vocab_path = Path(self.vocab_path).resolve()
 
-        data_dir = Path(self.data_dir).resolve()
-        save_vocab_dir = data_dir / "vocabs"
-        save_vocab_dir.mkdir(parents=True, exist_ok=True)
-        print("Training tokenizer...")
-        with open(data_dir / "src-train.txt") as f:
-            tokenizer.train_tokenizer(f)
-        tokenizer.save_vocab(save_vocab_dir / "vocab.json")
-        return tokenizer, tokenizer
+        tokenizer = AsciiTokenizer()
+        try:
+            tokenizer.load_vocab(self.vocab_path)
+            print(f"Loaded tokenizer vocabulary from {self.vocab_path}")
+        except FileNotFoundError:
+            print("Training tokenizer...")
+            with open(self.src_train_path) as f:
+                tokenizer.train_tokenizer(f)
+            tokenizer.save_vocab(self.vocab_path)
+            print(f"Saved tokenizer vocab to: {self.vocab_path}")
+        finally:
+            return tokenizer, tokenizer

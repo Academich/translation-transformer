@@ -51,14 +51,19 @@ class GenericTokenizer:
         raise NotImplementedError
 
     def save_vocab(self, voc_save_path: Path | str) -> None:
-        with open(voc_save_path, "w") as f:
+        p = Path(voc_save_path).resolve()
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with p.open("w") as f:
             json.dump(self.decoder_dict, f, sort_keys=True)
 
     def load_vocab(self, voc_load_path: Path | str) -> None:
         """
         Loads vocabulary dictionary which maps indices to strings
         """
-        with open(voc_load_path) as f:
+        p = Path(voc_load_path).resolve()
+        if not p.exists():
+            raise FileNotFoundError
+        with p.open() as f:
             self.decoder_dict = {int(k): v for k, v in json.load(f).items()}
             self.encoder_dict = reverse_dict(self.decoder_dict)
 
