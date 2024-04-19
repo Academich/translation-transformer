@@ -7,6 +7,7 @@ from torch import optim
 from pytorch_lightning import LightningModule
 from pytorch_lightning.utilities.types import STEP_OUTPUT
 
+from tokenization import GenericTokenizer
 from translators import TranslationInferenceBeamSearch, TranslationInferenceGreedy
 from utils import NoamLRSchedule, ConstantLRSchedule, calc_token_acc, calc_sequence_acc
 
@@ -14,9 +15,8 @@ from utils import NoamLRSchedule, ConstantLRSchedule, calc_token_acc, calc_seque
 class TranslationModel(LightningModule):
 
     def __init__(self,
-                 pad_token_idx: int = 0,  # Service token indices
-                 bos_token_idx: int = 1,
-                 eos_token_idx: int = 2,
+                 src_tokenizer: GenericTokenizer | None = None,  # Tokenizer objects
+                 tgt_tokenizer: GenericTokenizer | None = None,
 
                  learning_rate: float = 3e-4,  # Optimization arguments
                  weight_decay: float = 0.,
@@ -28,7 +28,21 @@ class TranslationModel(LightningModule):
                  max_len: int = 100
                  ):
         super().__init__()
-        self.save_hyperparameters()
+        self.save_hyperparameters(ignore=["src_tokenizer", "tgt_tokenizer"])
+
+        assert src_tokenizer is not None, "source tokenizer not provided"
+        assert tgt_tokenizer is not None, "target tokenizer not provided"
+        self.src_tokenizer = src_tokenizer
+        self.tgt_tokenizer = tgt_tokenizer
+        self.src_vocab_size: int = src_tokenizer.n_tokens
+        self.tgt_vocab_size: int = tgt_tokenizer.n_tokens
+        self.src_pad_token_i: int = src_tokenizer.pad_token_idx
+        self.src_bos_token_i: int = src_tokenizer.bos_token_idx
+        self.src_eos_token_i: int = src_tokenizer.eos_token_idx
+        self.tgt_pad_token_i: int = tgt_tokenizer.pad_token_idx
+        self.tgt_bos_token_i: int = tgt_tokenizer.bos_token_idx
+        self.tgt_eos_token_i: int = tgt_tokenizer.eos_token_idx
+
         self.criterion = nn.CrossEntropyLoss(reduction="mean")
 
         self.model: nn.Module | None = None
@@ -46,15 +60,15 @@ class TranslationModel(LightningModule):
             self.generator = TranslationInferenceBeamSearch(self.model,
                                                             self.hparams.beam_size,
                                                             self.hparams.max_len,
-                                                            self.hparams.pad_token_idx,
-                                                            self.hparams.bos_token_idx,
-                                                            self.hparams.eos_token_idx)
+                                                            self.tgt_pad_token_i,
+                                                            self.tgt_bos_token_i,
+                                                            self.tgt_eos_token_i)
         elif self.hparams.generation == "greedy":
             self.generator = TranslationInferenceGreedy(self.model,
                                                         self.hparams.max_len,
-                                                        self.hparams.pad_token_idx,
-                                                        self.hparams.bos_token_idx,
-                                                        self.hparams.eos_token_idx)
+                                                        self.tgt_pad_token_i,
+                                                        self.tgt_bos_token_i,
+                                                        self.tgt_eos_token_i)
         else:
             raise ValueError(
                 f'Unknown generation option {self.hparams.generation}. Options are "beam_search", "greedy".')
@@ -83,8 +97,8 @@ class TranslationModel(LightningModule):
 
         pred_tokens = torch.argmax(pred_logits, dim=2)
         token_acc = calc_token_acc(pred_tokens, target_future)
-        sequence_acc = calc_sequence_acc(pred_tokens, target_future, self.hparams.eos_token_idx)
-        mean_pad_tokens_in_target = (target_future == self.hparams.pad_token_idx).float().mean()
+        sequence_acc = calc_sequence_acc(pred_tokens, target_future, self.tgt_eos_token_i)
+        mean_pad_tokens_in_target = (target_future == self.tgt_pad_token_i).float().mean()
 
         self.log(f"train/loss", loss, on_step=True, on_epoch=True, prog_bar=True)
         self.log(f"train/acc_single_tok", token_acc, on_step=True, on_epoch=True, prog_bar=True)
@@ -102,7 +116,7 @@ class TranslationModel(LightningModule):
 
         pred_tokens = torch.argmax(pred_logits, dim=2)
         token_acc = calc_token_acc(pred_tokens, target_future)
-        sequence_acc = calc_sequence_acc(pred_tokens, target_future, self.hparams.eos_token_idx)
+        sequence_acc = calc_sequence_acc(pred_tokens, target_future, self.tgt_eos_token_i)
 
         self.log(f"val/loss", loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log(f"val/acc_single_tok", token_acc, on_step=False, on_epoch=True, prog_bar=False)
@@ -119,7 +133,7 @@ class TranslationModel(LightningModule):
         loss = self._calc_loss(pred_logits, target_future)
         pred_tokens = torch.argmax(pred_logits, dim=2)
         token_acc = calc_token_acc(pred_tokens, target_future)
-        sequence_acc = calc_sequence_acc(pred_tokens, target_future, self.hparams.eos_token_idx)
+        sequence_acc = calc_sequence_acc(pred_tokens, target_future, self.tgt_eos_token_i)
 
         self.log(f"test/loss", loss, on_step=False, on_epoch=True, prog_bar=True)
         self.log(f"test/acc_single_tok", token_acc, on_step=False, on_epoch=True, prog_bar=False)

@@ -17,12 +17,14 @@ class VanillaTransformer(nn.Module):
                  dropout_rate: float = 0.0,
                  activation: str = "relu",
                  share_embeddings: bool = False,
-                 pad_token_idx: int = 0
+                 src_pad_token_idx: int = 0,
+                 tgt_pad_token_idx: int = 0
                  ):
         super().__init__()
         self.src_vocab_size = src_vocab_size
         self.tgt_vocab_size = tgt_vocab_size
-        self.pad_token_idx = pad_token_idx
+        self.src_pad_token_i = src_pad_token_idx
+        self.tgt_pad_token_i = tgt_pad_token_idx
 
         self.num_enc_layers = num_encoder_layers
         self.num_dec_layers = num_decoder_layers
@@ -36,13 +38,13 @@ class VanillaTransformer(nn.Module):
     def create(self):
         # Embedding constructor
         self.src_token_featurizer = TokenEmbedding(self.src_vocab_size,
-                                                   self.emb_dim, padding_idx=self.pad_token_idx)
+                                                   self.emb_dim, padding_idx=self.src_pad_token_i)
         if self.share_embeddings:
             self.tgt_token_featurizer = self.src_token_featurizer
             assert self.src_vocab_size == self.tgt_vocab_size
         else:
             self.tgt_token_featurizer = TokenEmbedding(self.tgt_vocab_size,
-                                                       self.emb_dim, padding_idx=self.pad_token_idx)
+                                                       self.emb_dim, padding_idx=self.tgt_pad_token_i)
 
         self.positional_encoding = PositionalEncoding(self.emb_dim)
 
@@ -71,8 +73,8 @@ class VanillaTransformer(nn.Module):
         tgt_emb = self.positional_encoding(self.tgt_token_featurizer(tgt))
 
         # Update embeddings
-        src_pad_mask = self.generate_pad_mask(src)
-        tgt_pad_mask = self.generate_pad_mask(tgt)
+        src_pad_mask = (src == self.src_pad_token_i).bool()
+        tgt_pad_mask = (tgt == self.tgt_pad_token_i).bool()
         tgt_mask = self.transformer.generate_square_subsequent_mask(tgt_seq_len).type_as(tgt_emb)
         tgt_emb = self.transformer(src_emb,
                                    tgt_emb,

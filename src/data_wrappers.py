@@ -1,4 +1,3 @@
-from typing import Any
 from pathlib import Path
 
 import torch
@@ -27,8 +26,6 @@ class Seq2SeqDataset(Dataset):
 class Seq2SeqDM(LightningDataModule):
     def __init__(self,
                  data_dir: str | None = None,
-                 src_tokenizer: Any | None = None,
-                 tgt_tokenizer: Any | None = None,
                  batch_size: int = 1,
                  num_workers: int = 0,
                  persistent_workers=False,
@@ -43,13 +40,19 @@ class Seq2SeqDM(LightningDataModule):
         self.src_test_path = self.data_dir / "src-test.txt"
         self.tgt_test_path = self.data_dir / "tgt-test.txt"
 
-        self.src_tokenizer = src_tokenizer
-        self.tgt_tokenizer = tgt_tokenizer
-
         self.batch_size = batch_size
         self.shuffle_train = shuffle_train
         self.num_workers = num_workers
         self.persistent_workers = persistent_workers
+
+        self.src_tokenizer, self.tgt_tokenizer = self.create_tokenizers()
+
+    def create_tokenizers(self):
+        """
+        Create tokenizers for a particular task and assign
+        them to self.src_tokenizer and self.tgt_tokenizer
+        """
+        raise NotImplementedError
 
     def setup(self, stage: str | None = None) -> None:
         if stage == "fit" or stage is None:

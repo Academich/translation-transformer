@@ -7,8 +7,6 @@ from lightning_model_wrappers import TranslationModel
 class VanillaTransformerTranslationLightningModule(TranslationModel):
 
     def __init__(self,
-                 src_vocab_size: int | None = None,  # Model size and architecture arguments
-                 tgt_vocab_size: int | None = None,
                  embedding_dim: int = 128,
                  feedforward_dim: int = 256,
                  num_encoder_layers: int = 3,
@@ -23,8 +21,8 @@ class VanillaTransformerTranslationLightningModule(TranslationModel):
         super().__init__(**kwargs)
 
     def _create_model(self) -> None:
-        self.model = VanillaTransformer(self.hparams.src_vocab_size,
-                                        self.hparams.tgt_vocab_size,
+        self.model = VanillaTransformer(self.src_vocab_size,
+                                        self.tgt_vocab_size,
                                         self.hparams.num_encoder_layers,
                                         self.hparams.num_decoder_layers,
                                         self.hparams.embedding_dim,
@@ -33,7 +31,8 @@ class VanillaTransformerTranslationLightningModule(TranslationModel):
                                         self.hparams.dropout_rate,
                                         self.hparams.activation,
                                         self.hparams.share_embeddings,
-                                        self.hparams.pad_token_idx)
+                                        self.src_pad_token_i,
+                                        self.tgt_pad_token_i)
         self.model.create()
 
     def forward(self, batch: dict[str, Tensor]) -> Tensor:

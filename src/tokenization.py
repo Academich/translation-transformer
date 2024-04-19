@@ -32,7 +32,7 @@ class GenericTokenizer:
         self.encoder_dict, self.decoder_dict = self._make_dictionaries()
 
     @property
-    def n_tokens(self):
+    def n_tokens(self) -> int:
         return len(self.encoder_dict)
 
     def _make_dictionaries(self) -> tuple[dict[str, int], dict[int, str]]:
