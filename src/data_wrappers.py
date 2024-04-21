@@ -6,29 +6,45 @@ from torch.nn.utils.rnn import pad_sequence
 
 from pytorch_lightning import LightningDataModule
 
+from batching import TokenSampler
+from tokenization import GenericTokenizer
+
 
 class Seq2SeqDataset(Dataset):
 
-    def __init__(self, src_path: Path | str, tgt_path: Path | str):
+    def __init__(self,
+                 src_path: Path | str,
+                 tgt_path: Path | str,
+                 src_tokenizer: GenericTokenizer,
+                 tgt_tokenizer: GenericTokenizer):
+        self.src_tokenizer = src_tokenizer
+        self.tgt_tokenizer = tgt_tokenizer
         with open(src_path) as fs, open(tgt_path) as ft:
-            self.source = [s.strip() for s in fs.readlines()]
-            self.target = [s.strip() for s in ft.readlines()]
+            self.source: list[str] = [s.strip() for s in fs.readlines()]
+            self.target: list[str] = [s.strip() for s in ft.readlines()]
         assert len(self.source) == len(
             self.target), f"The source and target data at {src_path} and {tgt_path} have different lenghts"
+        self.source_tokens = [self.src_tokenizer.encode(s) for s in self.source]
+        self.target_tokens = [self.tgt_tokenizer.encode(s) for s in self.target]
+
+        self.source_lenghts = [len(i) for i in self.source_tokens]
+        self.target_lenghts = [len(i) for i in self.target_tokens]
 
     def __len__(self):
-        return len(self.source)
+        return len(self.source_tokens)
 
-    def __getitem__(self, item) -> tuple[str, str]:
-        return self.source[item], self.target[item]
+    def __getitem__(self, item):
+        return torch.tensor(self.source_tokens[item]).long(), torch.tensor(self.target_tokens[item]).long()
 
 
 class Seq2SeqDM(LightningDataModule):
     def __init__(self,
                  data_dir: str | None = None,
                  batch_size: int = 1,
+                 tokens_in_batch: int | None = None,
                  num_workers: int = 0,
                  persistent_workers=False,
+                 pin_memory: bool = False,
                  shuffle_train: bool = False):
         super().__init__()
 
@@ -44,6 +60,8 @@ class Seq2SeqDM(LightningDataModule):
         self.shuffle_train = shuffle_train
         self.num_workers = num_workers
         self.persistent_workers = persistent_workers
+        self.pin_memory = pin_memory
+        self.tokens_in_batch = tokens_in_batch
 
         self.src_tokenizer, self.tgt_tokenizer = self.create_tokenizers()
 
@@ -56,31 +74,21 @@ class Seq2SeqDM(LightningDataModule):
 
     def setup(self, stage: str | None = None) -> None:
         if stage == "fit" or stage is None:
-            self.train = Seq2SeqDataset(self.src_train_path, self.tgt_train_path)
-            self.val = Seq2SeqDataset(self.src_val_path, self.tgt_val_path)
+            self.train = Seq2SeqDataset(self.src_train_path, self.tgt_train_path, self.src_tokenizer,
+                                        self.tgt_tokenizer)
+            self.val = Seq2SeqDataset(self.src_val_path, self.tgt_val_path, self.src_tokenizer, self.tgt_tokenizer)
 
         if stage == "validate":
-            self.val = Seq2SeqDataset(self.src_val_path, self.tgt_val_path)
+            self.val = Seq2SeqDataset(self.src_val_path, self.tgt_val_path, self.src_tokenizer, self.tgt_tokenizer)
 
         if stage == "test" or stage is None:
-            self.test = Seq2SeqDataset(self.src_test_path, self.tgt_test_path)
+            self.test = Seq2SeqDataset(self.src_test_path, self.tgt_test_path, self.src_tokenizer, self.tgt_tokenizer)
 
         if stage == "predict" or stage is None:
-            self.prd = Seq2SeqDataset(self.src_test_path, self.tgt_test_path)
-
-    def _prepare_tokens(self, src_strings, tgt_strings) -> tuple[list[torch.Tensor], list[torch.Tensor]]:
-        src_tokens = []
-        tgt_tokens = []
-        for src_string, tgt_string in zip(src_strings, tgt_strings):
-            src_tokens.append(self.src_tokenizer.encode(src_string))
-            tgt_tokens.append(self.tgt_tokenizer.encode(tgt_string))
-        src_tokens = [torch.tensor(i).long() for i in src_tokens]
-        tgt_tokens = [torch.tensor(i).long() for i in tgt_tokens]
-        return src_tokens, tgt_tokens
+            self.prd = Seq2SeqDataset(self.src_test_path, self.tgt_test_path, self.src_tokenizer, self.tgt_tokenizer)
 
     def collate_fn(self, batch: list[tuple[str, str]]) -> dict[str, torch.Tensor]:
-        src_strings, tgt_strings = zip(*batch)
-        src_tokens, tgt_tokens = self._prepare_tokens(src_strings, tgt_strings)
+        src_tokens, tgt_tokens = zip(*batch)
         src_tokens = pad_sequence(src_tokens,
                                   padding_value=self.src_tokenizer.pad_token_idx, batch_first=True)
         tgt_tokens = pad_sequence(tgt_tokens,
@@ -88,12 +96,25 @@ class Seq2SeqDM(LightningDataModule):
         return {"src_tokens": src_tokens, "tgt_tokens": tgt_tokens}
 
     def train_dataloader(self):
-        return DataLoader(self.train,
-                          batch_size=self.batch_size,
-                          num_workers=self.num_workers,
-                          collate_fn=self.collate_fn,
-                          persistent_workers=self.persistent_workers,
-                          shuffle=self.shuffle_train)
+        if self.tokens_in_batch is None:
+            return DataLoader(self.train,
+                              batch_size=self.batch_size,
+                              num_workers=self.num_workers,
+                              collate_fn=self.collate_fn,
+                              persistent_workers=self.persistent_workers,
+                              pin_memory=self.pin_memory,
+                              shuffle=self.shuffle_train)
+        return DataLoader(
+            self.train,
+            batch_sampler=TokenSampler(
+                self.train.target_lenghts,
+                self.tokens_in_batch,
+                shuffle=self.shuffle_train
+            ),
+            num_workers=self.num_workers,
+            collate_fn=self.collate_fn,
+            pin_memory=self.pin_memory
+        )
 
     def val_dataloader(self):
         return DataLoader(self.val,
@@ -101,6 +122,7 @@ class Seq2SeqDM(LightningDataModule):
                           num_workers=self.num_workers,
                           collate_fn=self.collate_fn,
                           persistent_workers=self.persistent_workers,
+                          pin_memory=self.pin_memory,
                           shuffle=False)
 
     def test_dataloader(self):
@@ -109,6 +131,7 @@ class Seq2SeqDM(LightningDataModule):
                           num_workers=self.num_workers,
                           collate_fn=self.collate_fn,
                           persistent_workers=self.persistent_workers,
+                          pin_memory=self.pin_memory,
                           shuffle=False)
 
     def predict_dataloader(self):
@@ -117,4 +140,5 @@ class Seq2SeqDM(LightningDataModule):
                           num_workers=self.num_workers,
                           collate_fn=self.collate_fn,
                           persistent_workers=self.persistent_workers,
+                          pin_memory=self.pin_memory,
                           shuffle=False)
