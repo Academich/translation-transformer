@@ -58,17 +58,18 @@ class TranslationModel(LightningModule):
     def _create_generator(self):
         if self.hparams.generation == "beam_search":
             self.generator = TranslationInferenceBeamSearch(self.model,
-                                                            self.hparams.beam_size,
-                                                            self.hparams.max_len,
-                                                            self.tgt_pad_token_i,
-                                                            self.tgt_bos_token_i,
-                                                            self.tgt_eos_token_i)
+                                                            beam_size=self.hparams.beam_size,
+                                                            n_best=self.hparams.beam_size,
+                                                            max_len=self.hparams.max_len,
+                                                            pad_token=self.tgt_pad_token_i,
+                                                            bos_token=self.tgt_bos_token_i,
+                                                            eos_token=self.tgt_eos_token_i)
         elif self.hparams.generation == "greedy":
             self.generator = TranslationInferenceGreedy(self.model,
-                                                        self.hparams.max_len,
-                                                        self.tgt_pad_token_i,
-                                                        self.tgt_bos_token_i,
-                                                        self.tgt_eos_token_i)
+                                                        max_len=self.hparams.max_len,
+                                                        pad_token=self.tgt_pad_token_i,
+                                                        bos_token=self.tgt_bos_token_i,
+                                                        eos_token=self.tgt_eos_token_i)
         else:
             raise ValueError(
                 f'Unknown generation option {self.hparams.generation}. Options are "beam_search", "greedy".')
@@ -143,7 +144,7 @@ class TranslationModel(LightningModule):
 
     def predict_step(self, batch: Any, batch_idx: int, dataloader_idx: int = 0) -> Any:
         source = batch["src_tokens"]
-        generated = self.generator.generate(source, n_best=self.hparams.beam_size)
+        generated = self.generator.generate(source)
         return generated
 
     def configure_optimizers(self):
