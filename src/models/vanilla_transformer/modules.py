@@ -1,4 +1,4 @@
-from torch import LongTensor, BoolTensor
+from torch import LongTensor, BoolTensor, Tensor
 from torch import nn
 
 from models.embeddings import TokenEmbedding, PositionalEncoding
@@ -81,6 +81,34 @@ class VanillaTransformer(nn.Module):
                                    src_key_padding_mask=src_pad_mask,
                                    tgt_key_padding_mask=tgt_pad_mask,
                                    memory_key_padding_mask=src_pad_mask)
+
+        # Propose the next token
+        logits = self.next_token_classifier(tgt_emb)
+        return logits
+
+    def encode_src(self, src: LongTensor, src_pad_mask: BoolTensor):
+        # Embed tokens
+        src_emb = self.positional_encoding(self.src_token_featurizer(src))
+
+        # Update embeddings
+        src_emb = self.transformer.encoder(src_emb, src_key_padding_mask=src_pad_mask)
+        return src_emb
+
+    def decode_tgt(self, tgt: LongTensor, memory: Tensor, memory_pad_mask: BoolTensor):
+        _, tgt_seq_len = tgt.size()
+
+        # Embed tokens
+        tgt_emb = self.positional_encoding(self.tgt_token_featurizer(tgt))
+
+        # Update embeddings
+        tgt_pad_mask = (tgt == self.tgt_pad_token_i).bool()
+        tgt_mask = self.transformer.generate_square_subsequent_mask(tgt_seq_len).type_as(tgt_emb)
+        tgt_emb = self.transformer.decoder(tgt_emb,
+                                           memory,
+                                           tgt_mask=tgt_mask,
+                                           tgt_key_padding_mask=tgt_pad_mask,
+                                           memory_key_padding_mask=memory_pad_mask
+                                           )
 
         # Propose the next token
         logits = self.next_token_classifier(tgt_emb)

@@ -1,9 +1,6 @@
-from typing import Union, List, Callable
+from heapq import heappush, heappop
 
 import torch
-from torch.nn.utils.rnn import pad_sequence
-import copy
-from heapq import heappush, heappop
 
 
 # Beam size: K
@@ -14,7 +11,7 @@ from heapq import heappush, heappop
 class TranslationInferenceGreedy:
 
     def __init__(self,
-                 model: 'torch.nn.Module',  # TODO Or its subclasses
+                 model,  # TranslationModel
                  max_len: int,
                  pad_token: int,
                  bos_token: int,
@@ -31,8 +28,11 @@ class TranslationInferenceGreedy:
         generated_tokens[:, 0] = self.bos_token
         generated_tokens = generated_tokens.type_as(src).long()
 
+        src_pad_mask = (src == self.model.src_pad_token_i).bool()
+        memory = self.model.encode_src(src, src_pad_mask)
+
         for _ in range(self.max_len):
-            pred_logits = self.model(src, generated_tokens)
+            pred_logits = self.model.decode_tgt(generated_tokens, memory, memory_pad_mask=src_pad_mask)
             pred_token = torch.argmax(pred_logits, dim=2)[:, -1:]
             generated_tokens = torch.cat(
                 (generated_tokens,
@@ -62,20 +62,22 @@ class BeamSearchNode:
 class TranslationInferenceBeamSearch:
 
     def __init__(self,
-                 model: Callable[['torch.Tensor', 'torch.Tensor'], 'torch.Tensor'],
+                 model,  # TranslationModel
                  beam_size: int,
+                 n_best: int,
                  max_len: int,
                  pad_token: int,
                  bos_token: int,
                  eos_token: int):
         self.model = model
         self.beam_size = beam_size
+        self.n_best = n_best
         self.max_len = max_len
         self.pad_token = pad_token
         self.bos_token = bos_token
         self.eos_token = eos_token
 
-    def generate(self, src: 'torch.LongTensor', n_best) -> 'torch.LongTensor':
+    def generate(self, src: 'torch.LongTensor') -> 'torch.LongTensor':
         """Batch Beam Seach Decoding for RNN
               Args:
                   src: (bs, max_len)
@@ -85,7 +87,7 @@ class TranslationInferenceBeamSearch:
                   n_best_list: Decoded N-best results. (bs, T)
               """
 
-        assert self.beam_size >= n_best
+        assert self.beam_size >= self.n_best
         assert self.max_len > 1
 
         n_best_list = []
@@ -107,6 +109,9 @@ class TranslationInferenceBeamSearch:
         nonpad_length_per_sid = [1 for _ in range(bs)]
         curr_logprob_per_sid = [0. for _ in range(bs)]
 
+        src_pad_mask = (src == self.model.src_pad_token_i).bool()
+        memory = self.model.encode_src(src, src_pad_mask)
+
         while len(done_sids_set) < bs:
             # Fetch the best node
             sid = 0
@@ -123,7 +128,7 @@ class TranslationInferenceBeamSearch:
                     if n.decoder_inp[n.length - 1] == self.eos_token or n.length == self.max_len:
                         heappush(eosnodes_per_sid[sid], (-n.eval(), n))
                         # If we reached n_best finished predictions for the given sentence
-                        if len(eosnodes_per_sid[sid]) >= n_best:
+                        if len(eosnodes_per_sid[sid]) >= self.n_best:
                             done_sids_set.add(sid)
                             sid += 1
                     else:
@@ -135,7 +140,9 @@ class TranslationInferenceBeamSearch:
             batch_decoder_input = batch_decoder_input.type_as(src)  # (bs,max_len)
 
             # Decode for one step using decoder
-            decoder_output = self.model(src, batch_decoder_input)  # (bs, max_len, dict_len)
+            decoder_output = self.model.decode_tgt(batch_decoder_input,
+                                                   memory,
+                                                   memory_pad_mask=src_pad_mask)  # (bs, max_len, dict_len)
             decoder_output = torch.log(torch.softmax(decoder_output, dim=-1))
 
             # check shape of the prediction
@@ -167,8 +174,9 @@ class TranslationInferenceBeamSearch:
                         heappush(nodetree_per_sid[sid], (-node.eval(), node))
 
         # Construct sequences from end_nodes
-        # if there are no end_nodes, retrieve best nodes (they are probably truncated)
-        n_best_seq_list = torch.tensor([self.pad_token] * self.max_len).repeat(bs, n_best, 1)  # (bs, n_best, max_len)
+        # if there are no end_nodes, retrieve the best nodes (they are probably truncated)
+        n_best_seq_list = torch.tensor([self.pad_token] * self.max_len).repeat(bs, self.n_best,
+                                                                               1)  # (bs, n_best, max_len)
         for sid in range(bs):
             # if this sentence hasn't come to its dot
             if len(eosnodes_per_sid[sid]) == 0:
@@ -189,8 +197,9 @@ if __name__ == '__main__':
     tr = TranslationInferenceBeamSearch(model=MockCopySequence(),
                                         max_len=4,
                                         beam_size=3,
+                                        n_best=3,
                                         pad_token=MockCopySequence.pad_token,
                                         bos_token=MockCopySequence.bos_token,
                                         eos_token=MockCopySequence.eos_token)
     src = torch.tensor([[1, 2, 3, 4, 10]])
-    print(tr.generate(src, n_best=3))
+    print(tr.generate(src))
