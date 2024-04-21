@@ -42,9 +42,7 @@ class TranslationInferenceGreedy:
             if (torch.logical_or(pred_token == self.eos_token,
                                  pred_token == self.pad_token)).sum().item() == b_size:
                 break
-
-        # Unified output format with TranslationInferenceBeamSearch
-        return [i for i in generated_tokens.unsqueeze(1)]
+        return torch.cat([i.unsqueeze(0) for i in generated_tokens.unsqueeze(1)], dim=0)
 
 
 class BeamSearchNode:
