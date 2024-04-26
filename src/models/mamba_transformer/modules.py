@@ -224,6 +224,29 @@ class TransformerEncMambaTransformerDec(nn.Module):
         logits = self.next_token_classifier(tgt_emb)
         return logits
 
+    def encode_src(self, src: LongTensor, src_pad_mask: BoolTensor):
+        # Embed tokens
+        src_emb = self.positional_encoding(self.src_token_featurizer(src))
+
+        # Update embeddings
+        src_emb = self.encoder(src_emb, src_key_padding_mask=src_pad_mask)
+        return src_emb
+
+    def decode_tgt(self, tgt: LongTensor, memory: Tensor, memory_pad_mask: BoolTensor):
+        _, tgt_seq_len = tgt.size()
+
+        # Embed tokens
+        tgt_emb = self.positional_encoding(self.tgt_token_featurizer(tgt))
+
+        # Update embeddings
+        for dec_layer in self.decoder:
+            tgt_emb = dec_layer(tgt_emb, memory,
+                                memory_key_padding_mask=memory_pad_mask)
+
+        # Propose the next token
+        logits = self.next_token_classifier(tgt_emb)
+        return logits
+
 
 class MambaMixerModel(nn.Module):
     def __init__(
