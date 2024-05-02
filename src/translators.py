@@ -22,6 +22,9 @@ class TranslationInferenceGreedy:
         self.bos_token = bos_token
         self.eos_token = eos_token
 
+    def __str__(self):
+        return f"Greedy decoding (max_len={self.max_len})"
+
     def generate(self, src: 'torch.LongTensor') -> 'torch.LongTensor':
         b_size = src.size()[0]
         generated_tokens = torch.full((b_size, 1), self.pad_token)
@@ -76,6 +79,9 @@ class TranslationInferenceBeamSearch:
         self.pad_token = pad_token
         self.bos_token = bos_token
         self.eos_token = eos_token
+
+    def __str__(self):
+        return f"Beam search decoding (beam_size={self.beam_size}, n_best={self.n_best}, max_len={self.max_len})"
 
     def generate(self, src: 'torch.LongTensor') -> 'torch.LongTensor':
         """Batch Beam Seach Decoding for RNN

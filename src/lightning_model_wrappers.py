@@ -161,6 +161,7 @@ class TranslationModel(LightningModule):
         if self.report_prediction_time:
             elapsed = str(datetime.timedelta(seconds=timer() - self.prediction_start_time))
             print("Predict time elapsed:", elapsed)
+            print("Decoding:", self.generator)
 
     def configure_optimizers(self):
         optimizer = optim.Adam(self.parameters(),
