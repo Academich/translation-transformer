@@ -1,4 +1,6 @@
+import datetime
 from typing import Any
+from timeit import default_timer as timer
 
 import torch
 from torch import nn
@@ -25,7 +27,8 @@ class TranslationModel(LightningModule):
 
                  generation: str = "beam_search",  # Prediction generation arguments
                  beam_size: int = 1,
-                 max_len: int = 100
+                 max_len: int = 100,
+                 report_prediction_time: bool = False
                  ):
         super().__init__()
         self.save_hyperparameters(ignore=["src_tokenizer", "tgt_tokenizer"])
@@ -51,6 +54,9 @@ class TranslationModel(LightningModule):
             f"Override the _create_model method in {self.__class__} to assign an nn.Module to self.model"
 
         self._create_generator()
+
+        self.report_prediction_time = report_prediction_time
+        self.prediction_start_time = None
 
     def _create_model(self):
         raise NotImplementedError
@@ -146,6 +152,15 @@ class TranslationModel(LightningModule):
         source = batch["src_tokens"]
         generated = self.generator.generate(source)
         return generated
+
+    def on_predict_start(self) -> None:
+        if self.report_prediction_time:
+            self.prediction_start_time = timer()
+
+    def on_predict_end(self) -> None:
+        if self.report_prediction_time:
+            elapsed = str(datetime.timedelta(seconds=timer() - self.prediction_start_time))
+            print("Predict time elapsed:", elapsed)
 
     def configure_optimizers(self):
         optimizer = optim.Adam(self.parameters(),
