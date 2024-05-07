@@ -63,6 +63,9 @@ class BeamSearchNode:
 
 
 class TranslationInferenceBeamSearch:
+    """
+    Inspired by https://github.com/jarobyte91/pytorch_beam_search
+    """
 
     def __init__(self,
                  model,  # TranslationModel
@@ -197,7 +200,7 @@ class TranslationInferenceBeamSearch:
         return n_best_seq_list
 
 
-def num_speculative_tokens_to_accept(arr):
+def num_speculative_tokens_to_accept(arr: torch.BoolTensor):
     _range = arr.cumsum(-1)
     return (torch.arange(1, arr.size(1) + 1).type_as(_range) == _range).sum(-1)
 
@@ -229,9 +232,9 @@ class TranslationInferenceGreedySpeculativeUnbatched:
         src_pad_mask = (src == self.model.src_pad_token_i).bool()
         memory = self.model.encode_src(src, src_pad_mask)
 
-        n_copied = 1
+        src_idx_to_copy_from = 1
         while generated_tokens.size(1) < self.max_len:
-            draft_tokens = src[:, n_copied:n_copied + self.n_speculative_tokens]
+            draft_tokens = src[:, src_idx_to_copy_from:src_idx_to_copy_from + self.n_speculative_tokens]
             draft_sequence = torch.cat([
                 generated_tokens,
                 draft_tokens
@@ -241,7 +244,7 @@ class TranslationInferenceGreedySpeculativeUnbatched:
             pred_tokens = pred_tokens[:, -(draft_tokens.size(1) + 1):]
             n_accepted = num_speculative_tokens_to_accept(draft_tokens == pred_tokens[:, :-1])
             pred_tokens = pred_tokens[:, :n_accepted + 1]
-            n_copied = min(n_copied + n_accepted + 1, L - 1)
+            src_idx_to_copy_from = min(src_idx_to_copy_from + n_accepted + 1, L - 1)
 
             generated_tokens = torch.cat(
                 (generated_tokens,
