@@ -10,7 +10,7 @@ from pytorch_lightning import LightningModule
 from pytorch_lightning.utilities.types import STEP_OUTPUT
 
 from tokenization import GenericTokenizer
-from translators import TranslationInferenceBeamSearch, TranslationInferenceGreedy
+from translators import TranslationInferenceBeamSearch, TranslationInferenceGreedy, TranslationInferenceGreedySpeculativeUnbatched
 from utils import NoamLRSchedule, ConstantLRSchedule, calc_token_acc, calc_sequence_acc
 
 
@@ -28,6 +28,7 @@ class TranslationModel(LightningModule):
                  generation: str = "beam_search",  # Prediction generation arguments
                  beam_size: int = 1,
                  max_len: int = 100,
+                 n_speculative_tokens: int = 0,
                  report_prediction_time: bool = False
                  ):
         super().__init__()
@@ -76,9 +77,21 @@ class TranslationModel(LightningModule):
                                                         pad_token=self.tgt_pad_token_i,
                                                         bos_token=self.tgt_bos_token_i,
                                                         eos_token=self.tgt_eos_token_i)
+
+        elif self.hparams.generation == "greedy_speculative":
+            assert self.hparams.n_speculative_tokens > 0, "Number of speculative tokens must be a positive integer."
+            self.generator = TranslationInferenceGreedySpeculativeUnbatched(
+                self.model,
+                max_len=self.hparams.max_len,
+                n_speculative_tokens=self.hparams.n_speculative_tokens,
+                pad_token=self.tgt_pad_token_i,
+                bos_token=self.tgt_bos_token_i,
+                eos_token=self.tgt_eos_token_i
+            )
         else:
+            options = ", ".join(["beam_search", "greedy", "greedy_speculative"])
             raise ValueError(
-                f'Unknown generation option {self.hparams.generation}. Options are "beam_search", "greedy".')
+                f'Unknown generation option {self.hparams.generation}. Options are {options}.')
 
     def forward(self, batch: dict[str, torch.Tensor]) -> torch.Tensor:
         """

@@ -197,6 +197,62 @@ class TranslationInferenceBeamSearch:
         return n_best_seq_list
 
 
+def num_speculative_tokens_to_accept(arr):
+    _range = arr.cumsum(-1)
+    return (torch.arange(1, arr.size(1) + 1).type_as(_range) == _range).sum(-1)
+
+
+class TranslationInferenceGreedySpeculativeUnbatched:
+
+    def __init__(self,
+                 model,  # TranslationModel
+                 max_len: int,
+                 n_speculative_tokens: int,
+                 pad_token: int,
+                 bos_token: int,
+                 eos_token: int) -> None:
+        self.model = model
+        self.max_len = max_len
+        self.pad_token = pad_token
+        self.bos_token = bos_token
+        self.eos_token = eos_token
+
+        self.n_speculative_tokens = n_speculative_tokens
+
+    def __str__(self):
+        return f"Greedy speculative decoding (n_speculative_tokens={self.n_speculative_tokens}, max_len={self.max_len})"
+
+    def generate(self, src: 'torch.LongTensor') -> 'torch.LongTensor':
+        _, L = src.size()
+        generated_tokens = torch.full((1, 1), self.bos_token).type_as(src).long()
+
+        src_pad_mask = (src == self.model.src_pad_token_i).bool()
+        memory = self.model.encode_src(src, src_pad_mask)
+
+        n_copied = 1
+        while generated_tokens.size(1) < self.max_len:
+            draft_tokens = src[:, n_copied:n_copied + self.n_speculative_tokens]
+            draft_sequence = torch.cat([
+                generated_tokens,
+                draft_tokens
+            ], dim=-1)
+            pred_logits = self.model.decode_tgt(draft_sequence, memory, memory_pad_mask=src_pad_mask)
+            pred_tokens = torch.argmax(pred_logits, dim=2)
+            pred_tokens = pred_tokens[:, -(draft_tokens.size(1) + 1):]
+            n_accepted = num_speculative_tokens_to_accept(draft_tokens == pred_tokens[:, :-1])
+            pred_tokens = pred_tokens[:, :n_accepted + 1]
+            n_copied = min(n_copied + n_accepted + 1, L - 1)
+
+            generated_tokens = torch.cat(
+                (generated_tokens,
+                 pred_tokens),
+                dim=1
+            )
+            if (pred_tokens == self.eos_token).sum(-1).item() > 0:
+                break
+        return torch.cat([i.unsqueeze(0) for i in generated_tokens.unsqueeze(1)], dim=0)
+
+
 if __name__ == '__main__':
     from tests.mock_model import MockCopySequence
 
