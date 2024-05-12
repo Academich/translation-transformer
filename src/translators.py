@@ -325,6 +325,148 @@ def num_speculative_tokens_to_accept(arr: torch.BoolTensor):
     return (torch.arange(1, arr.size(1) + 1).type_as(_range) == _range).sum(-1)
 
 
+class TranslationInferenceBeamSearchDraftsLen2:
+
+    def __init__(self,
+                 model,  # TranslationModel
+                 beam_size: int,
+                 n_best: int,
+                 max_len: int,
+                 pad_token: int,
+                 bos_token: int,
+                 eos_token: int):
+        self.model = model
+        self.beam_size = beam_size
+        self.n_best = n_best
+        self.max_len = max_len
+        self.pad_token = pad_token
+        self.bos_token = bos_token
+        self.eos_token = eos_token
+        self.drafts_len_2 = torch.tensor(self.calculate_drafts_len_2())
+        self.n_drafts = self.drafts_len_2.size()[0]
+        print("n_drafts ", self.n_drafts)
+
+    def calculate_drafts_len_2(self):
+        drafts = []
+        # vocab_len = 5
+        vocab = {i: i for i in range(9)}  # {0: 0, 1: 2, 3: 4, 4: 5, 5: 6, 6: 7, 7: 41}
+        for n, i in vocab.items():
+            if i == self.pad_token or i == self.bos_token:
+                continue
+            if i == self.eos_token:
+                drafts.append([i, self.pad_token])
+                for _, j in vocab.items():
+                    if j == self.eos_token or j == self.bos_token or j == self.pad_token:
+                        continue
+                    drafts.append([j, i])
+                continue
+            drafts.append([i, i])
+            for m in range(n + 1, len(vocab)):
+                drafts.append([i, vocab[m]])
+                drafts.append([vocab[m], i])
+        return drafts
+
+    def __str__(self):
+        return f"Beam search decoding (beam_size={self.beam_size}, n_best={self.n_best}, max_len={self.max_len})"
+
+    def generate(self, src: 'torch.LongTensor') -> 'torch.LongTensor':
+        """Batch Beam Seach Decoding for RNN
+              Args:
+                  src: (bs, max_len)
+                  n_best: The number of output sequences for each input
+
+              Returns:
+                  n_best_list: Decoded N-best results. (bs, T)
+              """
+
+        b_sz, max_len = src.size()
+        assert b_sz == 1
+        # Prepare first tokens for decoder (bs, max_len)
+        batch_decoder_input = torch.tensor([self.bos_token]).repeat(b_sz, 1).long()
+        src_pad_mask = (src == self.model.src_pad_token_i).bool()  # (b_sz, max_len)
+        memory = self.model.encode_src(src, src_pad_mask)  # (b_sz, max_len, dim)
+        logits = self.model.decode_tgt(batch_decoder_input,
+                                       memory,
+                                       memory_pad_mask=src_pad_mask)[:, 0,
+                 :]  # (bsz, max_len, dict_len) -> (bsz, dict_len)
+        probs = torch.softmax(logits, dim=-1)
+        probs[:, self.pad_token] = -1.
+        curr_probs, seqs = probs.topk(self.beam_size, dim=-1)  # b_sz, beam_width
+        bos = torch.tensor([self.bos_token]).repeat(self.beam_size, 1).long()  # (beam_size,1)
+        pred_lsts = []
+
+        for i in range(b_sz):
+            curr_seqs = torch.cat((bos, seqs[i].unsqueeze(1)), dim=1)  # beam_width, 2
+            memory_i = memory[i].unsqueeze(0).expand(self.beam_size * self.n_drafts, -1, -1)
+            src_pad_mask_i = src_pad_mask[i].unsqueeze(0).expand(self.beam_size * self.n_drafts, -1)
+            best_candidates = []
+            num_done = 0
+            curr_probs = torch.ones(self.beam_size)
+            n_best_list = self.bm_search_drafts_len_2(memory_i, src_pad_mask_i, curr_probs, curr_seqs,
+                                                              best_candidates, num_done)  # curr_probs[i]
+            tmp = torch.cat([F.pad(t.unsqueeze(0), pad=(0, self.max_len - t.shape[0], 0, 0)) for t in n_best_list],
+                            dim=0)  # (n_best,max_len)
+            pred_lsts.append(tmp.unsqueeze(0))
+        # print("pred_lsts", pred_lsts)
+        return torch.cat(pred_lsts, dim=0)  # (b_sz,n_best,max_len)
+
+    def bm_search_drafts_len_2(self, memory, src_pad_mask, curr_probs, inds_curr_seq, best_candidates,
+                                       num_done):
+        # "recursive_bm_srch_eos"
+        # memory:
+        # src_pad_mask:
+        # curr_probs: (beam_width)
+        # inds_curr_seq (beam_width, curr_len)
+        # best_candidates: list
+
+        beam_width, curr_len = inds_curr_seq.size()
+        if curr_len == self.max_len:
+            return best_candidates[:self.n_best]  # (n_best, self.max_len)
+
+        prelim_probs = curr_probs.unsqueeze(1).expand(beam_width, self.n_drafts).reshape(
+            self.n_drafts * beam_width)  # (beam_width) -> (beam_width, 1) -> (beam_width, N_drafts) ->
+        # -> (beam_width * N_drafts)
+
+        # Decode for one step using decoder
+        inp = torch.cat((inds_curr_seq.unsqueeze(1).expand(beam_width, self.n_drafts, -1),
+                         self.drafts_len_2.unsqueeze(0).expand(beam_width, self.n_drafts, -1)),
+                        dim=-1)  # (beam_width, 1, curr_len) (1, N_drafts, 2) -> (beam_width, N_drafts, curr_len + 2)
+        inp = inp.reshape(self.n_drafts * beam_width, curr_len + 2)
+        draft_logits = self.model.decode_tgt(inp,
+                                             memory,
+                                             memory_pad_mask=src_pad_mask)[:, :-1,
+                       :]  # (beam_width * N_drafts, curr_len + 1, dict_len)
+        draft_probs = torch.softmax(draft_logits, dim=-1)  # (beam_width * N_drafts, curr_len + 1, dict_len)
+        ##probs = torch.prod(torch.prod(draft_probs, dim=-1), dim=-1)  # (beam_width * N_drafts, curr_len + 1, dict_len) ->
+        ## -> (beam_width * N_drafts, curr_len + 1)  -> (beam_width * N_drafts)  ## ETO ZAGLUSHKA
+
+        probs = torch.prod(torch.gather(draft_probs, 2, inp[:, 1:].unsqueeze(-1)).squeeze(-1),
+                           dim=-1)  # для bos не надо считать вероятность
+        # (self.n_drafts * beam_width, 1, curr_len + 2) -> (self.n_drafts * beam_width, curr_len + 2)
+
+        probs *= prelim_probs  ###
+
+        best_probs, best_seqs_inds = probs.topk(beam_width,
+                                                dim=-1)  # (beam_width), (beam_width) (нагенерили n_drafts * beam_width вариантов)
+        best_seqs = inp[best_seqs_inds]  # (beam_width, curr_len + 2)
+        num_finished = torch.sum((best_seqs == self.eos_token)[:, -2:]).item()
+
+        if num_finished:
+            best_candidates += [t.cpu() for t in
+                                best_seqs[torch.sum((best_seqs == self.eos_token)[:, -2:],
+                                                    dim=-1).bool()]]  # num_finished, curr_len + 2
+            curr_probs[torch.sum((best_seqs == self.eos_token)[:, -2:], dim=-1).bool()] = -1.
+
+            num_done += num_finished
+            if num_done >= self.n_best:
+                # Что если num_done больше n_best?
+                return best_candidates[:self.n_best]  # list of tensors(num_done, different_lens)
+
+        rg_ids_chains = self.bm_search_drafts_len_2(memory, src_pad_mask, curr_probs, best_seqs,
+                                                            best_candidates, num_done)
+        return rg_ids_chains
+
+
 class TranslationInferenceGreedySpeculativeUnbatched:
 
     def __init__(self,
