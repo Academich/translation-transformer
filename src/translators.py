@@ -1,6 +1,7 @@
 from heapq import heappush, heappop
 
 import torch
+from torch.nn.utils.rnn import pad_sequence
 
 
 # Beam size: K
@@ -223,34 +224,48 @@ class TranslationInferenceGreedySpeculativeUnbatched:
         return f"Greedy speculative decoding (n_speculative_tokens={self.n_speculative_tokens}, max_len={self.max_len})"
 
     def generate(self, src: 'torch.LongTensor') -> 'torch.LongTensor':
-        _, L = src.size()
-        generated_tokens = torch.full((1, 1), self.bos_token).type_as(src).long()
+        b_size, src_len = src.size()
 
         src_pad_mask = (src == self.model.src_pad_token_i).bool()
         memory = self.model.encode_src(src, src_pad_mask)
 
-        n_copied = 1
-        while generated_tokens.size(1) < self.max_len:
-            draft_tokens = src[:, n_copied:n_copied + self.n_speculative_tokens]
-            draft_sequence = torch.cat([
-                generated_tokens,
-                draft_tokens
-            ], dim=-1)
-            pred_logits = self.model.decode_tgt(draft_sequence, memory, memory_pad_mask=src_pad_mask)
-            pred_tokens = torch.argmax(pred_logits, dim=2)
-            pred_tokens = pred_tokens[:, -(draft_tokens.size(1) + 1):]
-            n_accepted = num_speculative_tokens_to_accept(draft_tokens == pred_tokens[:, :-1])
-            pred_tokens = pred_tokens[:, :n_accepted + 1]
-            n_copied = min(n_copied + n_accepted + 1, L - 1)
+        src_unbatched = src.unsqueeze(1)
+        src_pad_mask_unbatched = src_pad_mask.unsqueeze(1)
+        memory_unbatched = memory.unsqueeze(1)
 
-            generated_tokens = torch.cat(
-                (generated_tokens,
-                 pred_tokens),
-                dim=1
-            )
-            if (pred_tokens == self.eos_token).sum(-1).item() > 0:
-                break
-        return torch.cat([i.unsqueeze(0) for i in generated_tokens.unsqueeze(1)], dim=0)
+        result = []
+        for i in range(b_size):
+            generated_tokens = torch.full((1, 1), self.bos_token).type_as(src).long()
+            draft_tokens = src_unbatched[i, :, 1:].unfold(-1, self.n_speculative_tokens, 1).squeeze(0)
+            n_drafts = draft_tokens.size(0)
+            iters = 0
+            while generated_tokens.size(1) < self.max_len:
+                iters += 1
+                draft_sequence = torch.cat([generated_tokens.repeat(n_drafts, 1), draft_tokens], dim=-1)
+                pred_logits = self.model.decode_tgt(draft_sequence,
+                                                    memory_unbatched[i].repeat(n_drafts, 1, 1),
+                                                    memory_pad_mask=src_pad_mask_unbatched[i].repeat(n_drafts, 1))
+                pred_tokens = torch.argmax(pred_logits, dim=2)
+                pred_tokens = pred_tokens[:, -(draft_tokens.size(1) + 1):]
+                verification = draft_tokens == pred_tokens[:, :-1]
+                _range = verification.cumsum(-1)
+                accepted_in_drafts = (torch.arange(1, verification.size(1) + 1).type_as(_range) == _range)
+                n_accepted_in_drafts = accepted_in_drafts.sum(-1)
+                n_accepted_in_drafts = n_accepted_in_drafts.topk(1, -1)
+                draft_i = n_accepted_in_drafts.indices
+                n_accepted = n_accepted_in_drafts.values
+
+                pred_tokens = pred_tokens[draft_i, :n_accepted + 1]
+
+                generated_tokens = torch.cat(
+                    (generated_tokens,
+                     pred_tokens),
+                    dim=1
+                )
+                if (pred_tokens == self.eos_token).sum(-1).item() > 0:
+                    break
+            result.append(generated_tokens.squeeze(0))
+        return pad_sequence(result, padding_value=self.pad_token, batch_first=True).unsqueeze(1)
 
 
 if __name__ == '__main__':
