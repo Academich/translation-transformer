@@ -124,7 +124,7 @@ class TranslationInferenceBeamSearchOurs:
                 # To do: what if num_done > n_best?
                 return best_candidates  # list of num_done tensors of different lengths
 
-        rg_ids_chains = self.natasha_bm_search(memory, src_pad_mask, best_probs, best_seqs, best_candidates, num_done)
+        rg_ids_chains = self.bm_search(memory, src_pad_mask, best_probs, best_seqs, best_candidates, num_done)
         return rg_ids_chains
 
 
