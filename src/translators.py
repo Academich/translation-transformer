@@ -26,6 +26,9 @@ class TranslationInferenceGreedy:
     def __str__(self):
         return f"Greedy decoding (max_len={self.max_len})"
 
+    def sample(self, pred_logits):
+        return torch.argmax(pred_logits, dim=2)[:, -1:]
+
     def generate(self, src: 'torch.LongTensor') -> 'torch.LongTensor':
         b_size = src.size()[0]
         generated_tokens = torch.full((b_size, 1), self.pad_token)
@@ -37,7 +40,7 @@ class TranslationInferenceGreedy:
 
         for _ in range(self.max_len):
             pred_logits = self.model.decode_tgt(generated_tokens, memory, memory_pad_mask=src_pad_mask)
-            pred_token = torch.argmax(pred_logits, dim=2)[:, -1:]
+            pred_token = self.sample(pred_logits)
             generated_tokens = torch.cat(
                 (generated_tokens,
                  pred_token),
