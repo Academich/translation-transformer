@@ -518,6 +518,133 @@ class TranslationInferenceGreedySpeculativeUnbatched:
         return torch.cat([i.unsqueeze(0) for i in generated_tokens.unsqueeze(1)], dim=0)
 
 
+class TranslationInferenceBeamSearchSpeculative:
+    def __init__(self,
+                 model,  # TranslationModel
+                 beam_size: int,
+                 n_best: int,
+                 max_len: int,
+                 pad_token: int,
+                 bos_token: int,
+                 eos_token: int):
+
+        self.model = model
+        self.beam_size = beam_size
+        self.beam_width = beam_size
+        self.n_best = n_best
+        self.max_len = max_len
+        self.pad_token = pad_token
+        self.bos_token = bos_token
+        self.eos_token = eos_token
+        self.drafts_of_len_1 = torch.tensor(self.calculate_drafts_len_1())
+        self.n_drafts = self.drafts_of_len_1.size()[0]
+        print("n_drafts ", self.n_drafts)
+
+    def calculate_drafts_len_1(self):
+        drafts = []
+        # vocab_len = 5
+        vocab = [i for i in range(56)]
+        for i in vocab:
+            if i == self.bos_token:
+                continue
+            drafts.append([i])
+        return drafts
+
+    def generate(self, src: 'torch.LongTensor') -> 'torch.LongTensor':
+        assert self.max_len > 1
+        b_sz = src.shape[0]
+
+        # prepare src for the later cycle
+        src_bw = src.repeat((self.beam_width * self.n_drafts, 1, 1)).transpose(0, 1).flatten(end_dim=1)
+        # !(b_sz, src_len) -> (beam_width * n_drafts, b_sz, src_len) ->  (b_sz, beam_width * n_drafts, src_len) ->
+        # -> (b_sz * beam_width * n_drafts, src_len)
+        # src_bw: tensor(b_sz * beam_width * n_drafts, src_len)
+        # Example. b_sz: 2, src_len: 5, beam_width: 3, n_drafts: 1
+        #          src: tensor([[1, 5, 20, 27, 2],
+        #                       [1, 31, 2, 0, 0]])       - is a tensor of size (b_sz=2, src_len=5).
+        #    -> src_bw: tensor([[ 1,  5, 20, 27,  2],
+        #                       [ 1,  5, 20, 27,  2],
+        #                       [ 1,  5, 20, 27,  2],
+        #                       [ 1, 31,  2,  0,  0],
+        #                       [ 1, 31,  2,  0,  0],
+        #                       [ 1, 31,  2,  0,  0]])  - is a tensor of size (b_sz * beam_width * n_drafts, src_len=5).
+
+        # Prepare first tokens for decoder (bs, max_len)
+        y = torch.tensor([self.bos_token]).repeat(b_sz, 1).long().type_as(src)  # -> (b_sz, init_seq_len=1)
+
+        # Decode for one step using decoder
+        decoder_output = self.model(src, y)  # -> (b_sz, init_seq_len, vocab_size)
+        logprob_decoder_output = torch.log(torch.softmax(decoder_output, dim=-1))  # -> (b_sz, 1, vocab_size)
+
+        # check shape of the prediction
+        vocab_size = logprob_decoder_output.shape[-1]
+
+        probabilities, next_chars = torch.topk(logprob_decoder_output, self.beam_width,
+                                                 dim=-1, sorted=True)  # -> (b_sz, 1, beam_width), (b_sz, 1, beam_width)
+        probabilities = probabilities.squeeze(1)  # -> (b_sz, beam_width)
+
+        y = y.unsqueeze(1).repeat((1, 1, self.beam_width)).reshape(-1, 1)
+        # (b_sz, init_seq_len=1) -> (b_sz, 1, init_seq_len) ->  (b_sz, 1, init_seq_len * beam_width) ->
+        # -> (b_sz * beam_width, 1)
+
+        next_chars = next_chars.reshape(-1, 1)  # -> (b_sz * beam_width, seq_len=1)
+        y = torch.cat((y, next_chars), axis=-1)  # -> (b_sz * beam_width, curr_len)
+
+        predictions = self.max_len - 1
+        n_drafts, draft_len = self.drafts_of_len_1.size()
+
+        drafts = self.drafts_of_len_1.repeat(b_sz * self.beam_width, 1).type_as(src)  # (n_drafts, draft_len=1) ->
+        # -> (b_sz * beam_width * n_drafts, 1)
+        curr_len = 2
+
+        for i in range(predictions - 1):
+            y = y.reshape(b_sz, self.beam_width, curr_len).unsqueeze(2).repeat(1, 1, self.n_drafts, 1).reshape(
+                b_sz * self.beam_width * self.n_drafts, curr_len)
+            # (b_sz * beam_width, curr_len) -> (b_sz * self.beam_width * self.n_drafts, curr_len)
+
+            y = torch.cat((y, drafts), axis=1)  # (b_sz * beam_width * n_drafts, curr_len), (b_sz * beam_width * n_drafts, 1) ->
+            # -> (b_sz * beam_width * n_drafts, curr_len)   ###(beam_width * bs, 2+i))
+            curr_len += 1
+            outp = torch.log(torch.softmax(self.model(src_bw, y), dim=-1))  # -> (b_sz * beam_width * n_drafts, curr_len, vocab_size)
+            drafts_probs = torch.gather(outp[:, :-1, :], dim=2, index=y[:, 1:].unsqueeze(2)).squeeze(2)  # -> (b_sz * beam_width * n_drafts, curr_len)
+            drafts_probs = torch.sum(drafts_probs, dim=1)  # -> (b_sz * beam_width * n_drafts)
+            draft_probs = drafts_probs.reshape(b_sz, self.beam_width * self.n_drafts)  # ->(b_sz, beam_width * n_drafts)
+            top_draft_probs, inds = torch.topk(draft_probs, self.beam_width, dim=1, sorted=True)
+            # (b_sz, beam_width * n_drafts) -> (b_sz, beam_width), (b_sz, beam_width)
+
+            last_pred = outp[:, -1, :]  # -> (b_sz * beam_width * n_drafts, vocab_size)
+            last_pred = last_pred.reshape(b_sz, self.beam_width * self.n_drafts, vocab_size)
+            inds_tmp = inds.unsqueeze(-1).expand(b_sz, self.beam_width, vocab_size)
+            next_probabilities = torch.gather(last_pred, 1, inds_tmp)  # -> (b_sz, beam_width, vocab_size)
+
+            inds = inds.unsqueeze(-1).expand(b_sz, self.beam_width, curr_len)
+            y = torch.gather(y.reshape(b_sz, self.beam_width * self.n_drafts, curr_len), 1, inds)
+            y = y.reshape(b_sz * self.beam_width, curr_len)   #(b_sz, beam_width, curr_len) ->(b_sz * beam_width, curr_len)
+            if curr_len == self.max_len:
+                break
+
+            probabilities = top_draft_probs  # (b_sz, beam_width)
+
+            probabilities = probabilities.unsqueeze(-1) + next_probabilities
+            # (examples,b_w,1) + (examples,b_w,vocab_size) ->(examples,b_w,vocab_size)
+
+            probabilities = probabilities.flatten(start_dim=1)  # (examples,b_w * vocab_size)
+            probabilities, idx = probabilities.topk(k=self.beam_width, axis=-1, sorted=True)  # (examples,b_w), (examples,b_w)
+            next_chars = torch.remainder(idx, vocab_size).flatten().unsqueeze(-1)  # (examples * b_w,1)
+            best_candidates = (idx / vocab_size).long()  # (examples,b_w)
+            best_candidates += torch.arange(y.shape[0] // self.beam_width, device=src.device).unsqueeze(-1) * self.beam_width  # (beam_width * bs, 1)
+            y = y[best_candidates].flatten(end_dim=-2)  # (beam_width * bs, 2+i)
+            y = torch.cat((y, next_chars), axis=1)  # (beam_width * bs, 2+i)
+            curr_len += 1
+            if curr_len == self.max_len:
+                break
+        y = y.reshape(b_sz, self.beam_width, self.max_len)
+        return y  # , probabilities  # (examples,b_w, max_len), (examples,b_w)
+
+    def __str__(self):
+        return f"Beam search decoding (beam_size={self.beam_size}, n_best={self.n_best}, max_len={self.max_len})"
+
+
 if __name__ == '__main__':
     from tests.mock_model import MockCopySequence
 
