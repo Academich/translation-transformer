@@ -84,126 +84,61 @@ class TranslationInferenceBeamSearch:
         self.bos_token = bos_token
         self.eos_token = eos_token
 
+        assert self.beam_size >= self.n_best
+        assert self.max_len > 1
+
     def __str__(self):
         return f"Beam search decoding (beam_size={self.beam_size}, n_best={self.n_best}, max_len={self.max_len})"
 
     def generate(self, src: 'torch.LongTensor') -> 'torch.LongTensor':
-        """Batch Beam Seach Decoding for RNN
-              Args:
-                  src: (bs, max_len)
-                  n_best: The number of output sequences for each input
-
-              Returns:
-                  n_best_list: Decoded N-best results. (bs, T)
-              """
-
-        assert self.beam_size >= self.n_best
-        assert self.max_len > 1
-
-        n_best_list = []
-        bs = src.shape[0]
+        bs, _ = src.size()
 
         # Prepare first tokens for decoder (bs, max_len)
-        batch_decoder_input = torch.tensor([self.bos_token] + [self.pad_token] * (self.max_len - 1)).repeat(bs,
-                                                                                                            1).long()
+        y = torch.tensor([self.bos_token]).repeat(bs, 1).long().type_as(src)  # (bs,1)
 
-        # list of eosnodes for each sentence in the batch
-        eosnodes_per_sid = [[] for _ in range(bs)]
+        # Decode for one step using decoder
+        decoder_output = self.model(src, y)  # (bs, 1, dict_len)
+        logprob_decoder_output = torch.log(torch.softmax(decoder_output, dim=-1))
 
-        # whole beam search node tree
-        nodetree_per_sid = [[] for _ in range(bs)]
+        # check shape of the prediction
+        vocab_size = logprob_decoder_output.shape[-1]
 
-        # Start beam search
-        done_sids_set = set()
+        probabilities, next_chars = torch.topk(logprob_decoder_output, self.beam_size,
+                                               dim=-1, sorted=True)  # (bs, 1, beam_width), (bs, 1, beam_width)
+        probabilities = probabilities.squeeze(1)  # (bs, beam_width)
+        y = y.unsqueeze(1).repeat((1, 1, self.beam_size)).reshape(-1, 1)
+        # (beam_width * bs, 1)
 
-        nonpad_length_per_sid = [1 for _ in range(bs)]
-        curr_logprob_per_sid = [0. for _ in range(bs)]
+        next_chars = next_chars.reshape(-1, 1)  # (bs *beam_width, 1)
+        y = torch.cat((y, next_chars), axis=-1)  # (beam_width * bs, 2)
 
-        src_pad_mask = (src == self.model.src_pad_token_i).bool()
-        memory = self.model.encode_src(src, src_pad_mask)
+        src_bw = src.repeat((self.beam_size, 1, 1)).transpose(0, 1).flatten(end_dim=1)  # (b_w, examples, length)
+        # (examples, beam_width, length) # fin_X [[5,20],[5,20],[5,20],[2,31],[2,31],[2,31]]
+        # (b_w * examples, length)
 
-        while len(done_sids_set) < bs:
-            # Fetch the best node
-            sid = 0
-            while sid < bs:
-                if sid in done_sids_set:
-                    done_sids_set.add(sid)
-                    # we don't need to work with such a sentence anymore
-                    sid += 1
-                elif len(nodetree_per_sid[sid]) == 0:
-                    # nothing to do if the tree of the given node is empty
-                    sid += 1
-                else:
-                    score, n = heappop(nodetree_per_sid[sid])  # pop the best node for the given sentence id
-                    if n.decoder_inp[n.length - 1] == self.eos_token or n.length == self.max_len:
-                        heappush(eosnodes_per_sid[sid], (-n.eval(), n))
-                        # If we reached n_best finished predictions for the given sentence
-                        if len(eosnodes_per_sid[sid]) >= self.n_best:
-                            done_sids_set.add(sid)
-                            sid += 1
-                    else:
-                        nonpad_length_per_sid[sid] = n.length
-                        curr_logprob_per_sid[sid] = n.logprob
-                        batch_decoder_input[sid] = torch.tensor(n.decoder_inp)
-                        sid += 1
+        predictions = self.max_len - 1
 
-            batch_decoder_input = batch_decoder_input.type_as(src)  # (bs,max_len)
+        for i in range(predictions - 1):
+            next_probabilities = torch.log(torch.softmax(self.model(src_bw, y), dim=-1))[:, -1,
+                                 :]  # (bs*b_w, vocab_size)
 
-            # Decode for one step using decoder
-            decoder_output = self.model.decode_tgt(batch_decoder_input,
-                                                   memory,
-                                                   memory_pad_mask=src_pad_mask)  # (bs, max_len, dict_len)
-            decoder_output = torch.log(torch.softmax(decoder_output, dim=-1))
+            next_probabilities = next_probabilities.reshape(
+                (-1, self.beam_size, next_probabilities.shape[-1]))  # (examples, b_w, vocab_size)
 
-            # check shape of the prediction
-            dictnr_len = decoder_output.shape[2]
-            assert self.beam_size <= dictnr_len
-            assert decoder_output.shape == (bs, self.max_len, dictnr_len)
+            probabilities = probabilities.unsqueeze(-1) + next_probabilities
+            # (examples,b_w,1) + (examples,b_w,vocab_size) ->(examples,b_w,vocab_size)
 
-            # Get top-k from this decoded result
-            topk_log_prob, topk_indexes = torch.topk(decoder_output, self.beam_size,
-                                                     dim=-1)  # (bs, max_len, beam_size), (bs, max_len, beam_size)
-
-            # Then, register new top-k nodes
-            for sid in range(bs):
-                if sid in done_sids_set:
-                    continue
-                last_t_before_pad_id = nonpad_length_per_sid[sid] - 1
-
-                for new_cnddt in range(self.beam_size):
-                    decoded_t = topk_indexes[sid][last_t_before_pad_id][new_cnddt].item()  # int64
-                    logp = topk_log_prob[sid][last_t_before_pad_id][new_cnddt].item()  # float log probability val
-                    batch_decoder_input[sid][last_t_before_pad_id + 1] = decoded_t
-
-                    node = BeamSearchNode(decoder_inp=torch.tensor(batch_decoder_input[sid]),
-                                          logprob=curr_logprob_per_sid[sid] + logp,
-                                          length=nonpad_length_per_sid[sid] + 1)
-                    if decoded_t == self.eos_token and node.length <= 2:  # if predicted [bos,eos]
-                        continue
-                    else:
-                        heappush(nodetree_per_sid[sid], (-node.eval(), node))
-
-        # Construct sequences from end_nodes
-        # if there are no end_nodes, retrieve the best nodes (they are probably truncated)
-        n_best_seq_list = torch.tensor([self.pad_token] * self.max_len).repeat(bs, self.n_best,
-                                                                               1)  # (bs, n_best, max_len)
-        for sid in range(bs):
-            # if this sentence hasn't come to its dot
-            if len(eosnodes_per_sid[sid]) == 0:
-                eosnodes_per_sid[sid] = [heappop(nodetree_per_sid[sid]) for _ in range(self.beam_size)]
-
-            for decoded_seq_id, score_n_tuple in enumerate(eosnodes_per_sid[sid]):
-                n = score_n_tuple[1]
-                decoded_seq = n.decoder_inp
-
-                n_best_seq_list[sid][decoded_seq_id] = torch.tensor(decoded_seq)
-
-        return n_best_seq_list
-
-
-def num_speculative_tokens_to_accept(arr):
-    _range = arr.cumsum(-1)
-    return (torch.arange(1, arr.size(1) + 1).type_as(_range) == _range).sum(-1)
+            probabilities = probabilities.flatten(start_dim=1)  # (examples,b_w * vocab_size)
+            probabilities, idx = probabilities.topk(k=self.beam_size, axis=-1,
+                                                    sorted=True)  # (examples,b_w), (examples,b_w)
+            next_chars = torch.remainder(idx, vocab_size).flatten().unsqueeze(-1)  # (examples * b_w,1)
+            best_candidates = (idx / vocab_size).long()  # (examples,b_w)
+            best_candidates += torch.arange(y.shape[0] // self.beam_size, device=src.device).unsqueeze(
+                -1) * self.beam_size  # (beam_width * bs, 1)
+            y = y[best_candidates].flatten(end_dim=-2)  # (beam_width * bs, 2+i)
+            y = torch.cat((y, next_chars), axis=1)  # (beam_width * bs, 2+i)
+        y = y.reshape(bs, self.beam_size, self.max_len)
+        return y  # , probabilities  # (examples,b_w, max_len), (examples,b_w)
 
 
 class TranslationInferenceGreedySpeculativeUnbatched:
