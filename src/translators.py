@@ -734,11 +734,11 @@ class TranslationInferenceNucleusSpeculativeUnbatchedMinAccepted:
 
                 pred_tokens = pred_tokens.reshape(self.n_best, n_drafts, seq_len)
                 pred_tokens = pred_tokens[:, :, -(draft_tokens.size(1) + 1):]  # (n_best, n_drafts, curr_len + draft_len) -> (n_best, n_drafts, draft_len + 1)
-                verification = draft_tokens.reshape(n_best, n_drafts, -1) == pred_tokens[:, :, -1]  # (n_best, n_drafts, draft_len + 1) -> (n_best, n_drafts, draft_len)
+                verification = draft_tokens.reshape(n_best, n_drafts, -1) == pred_tokens[:, :, :-1]  # (n_best, n_drafts, draft_len + 1) -> (n_best, n_drafts, draft_len)
                 _range = verification.cumsum(-1)  # (n_best, n_drafts, draft_len)
-                accepted_in_drafts = (torch.arange(1, verification.size(1) + 1).type_as(_range) == _range)  # (n_best, n_drafts, draft_len)
-                n_accepted_in_drafts = accepted_in_drafts.sum(1)  # (n_best, n_drafts, draft_len) -> (n_best, n_drafts)
-                n_accepted_in_drafts = n_accepted_in_drafts.topk(1, 1)  # (n_best, n_drafts) -> (n_best, 1)
+                accepted_in_drafts = (torch.arange(1, verification.size(2) + 1).unsqueeze(0).unsqueeze(0).type_as(_range) == _range)  # (n_best, n_drafts, draft_len)
+                n_accepted_in_drafts = accepted_in_drafts.sum(2)  # (n_best, n_drafts, draft_len) -> (n_best, n_drafts)
+                n_accepted_in_drafts = n_accepted_in_drafts.topk(1, dim=1)  # (n_best, n_drafts) -> (n_best, 1)
                 draft_i = n_accepted_in_drafts.indices  # (n_best, 1)
                 n_accepted = n_accepted_in_drafts.values  # (n_best, 1)
 
