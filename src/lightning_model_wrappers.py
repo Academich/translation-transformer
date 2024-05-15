@@ -29,8 +29,11 @@ class TranslationModel(LightningModule):
 
                  generation: str = "beam_search",  # Prediction generation arguments
                  beam_size: int = 1,
+                 n_best: int = 1,
                  max_len: int = 100,
                  n_speculative_tokens: int = 0,
+                 nucleus: float = 0.995,
+                 temperature: float = 1,
                  report_prediction_time: bool = False
                  ):
         super().__init__()
