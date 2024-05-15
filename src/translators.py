@@ -266,13 +266,12 @@ class TranslationInferenceNucleusSpeculativeUnbatched:
         memory_unbatched = memory.unsqueeze(1)
 
         result = [[] for _ in range(b_size)]
-        n_best = 5
 
         for i in range(b_size):
             draft_tokens = src_unbatched[i, :, 1:].unfold(-1, self.n_speculative_tokens, 1).squeeze(0)
             n_drafts = draft_tokens.size(0)
             iters = 0
-            for j in range(n_best):
+            for j in range(self.n_best):
                 generated_tokens = torch.full((1, 1), self.bos_token).type_as(src).long()
                 while generated_tokens.size(1) < self.max_len:
                     iters += 1
