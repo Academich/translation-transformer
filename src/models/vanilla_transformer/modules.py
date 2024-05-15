@@ -94,11 +94,13 @@ class VanillaTransformer(nn.Module):
         src_emb = self.transformer.encoder(src_emb, src_key_padding_mask=src_pad_mask)
         return src_emb
 
-    def decode_tgt(self, tgt: LongTensor, memory: Tensor, memory_pad_mask: BoolTensor):
+    def decode_tgt(self, tgt: LongTensor, memory: Tensor, memory_pad_mask: BoolTensor,
+                   pos_enc_offset: LongTensor | int = 0):
         _, tgt_seq_len = tgt.size()
 
         # Embed tokens
-        tgt_emb = self.positional_encoding(self.tgt_token_featurizer(tgt))
+        tgt_emb = self.tgt_token_featurizer(tgt)
+        tgt_emb = self.positional_encoding(tgt_emb, offset=pos_enc_offset)
 
         # Update embeddings
         tgt_pad_mask = (tgt == self.tgt_pad_token_i).bool()
