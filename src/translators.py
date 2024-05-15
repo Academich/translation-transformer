@@ -241,8 +241,9 @@ class TranslationInferenceNucleusSpeculativeUnbatched:
         cumulative_probs = torch.cumsum(sorted_logits.softmax(-1), dim=-1)  # -> (n_drafts * curr_len, vocab_size)
 
         # Remove tokens with cumulative probability above the threshold
-        keep_candidates_mask = torch.cat([torch.zeros(cumulative_probs.size(0), 1), cumulative_probs[:, :-1]],
-                                         axis=-1) < self.nucleus  # -> (n_drafts * curr_len, vocab_size)
+        cumulative_probs = torch.roll(cumulative_probs, 1, dims=-1)
+        cumulative_probs[:, 0] = 0
+        keep_candidates_mask = cumulative_probs < self.nucleus  # -> (n_drafts * curr_len, vocab_size)
 
         sorted_logits.masked_fill_(~keep_candidates_mask, float("-inf"))
 
