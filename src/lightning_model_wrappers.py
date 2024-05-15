@@ -10,7 +10,9 @@ from pytorch_lightning import LightningModule
 from pytorch_lightning.utilities.types import STEP_OUTPUT
 
 from tokenization import GenericTokenizer
-from translators import TranslationInferenceBeamSearch, TranslationInferenceGreedy, TranslationInferenceGreedySpeculativeUnbatched
+from translators import TranslationInferenceBeamSearch, TranslationInferenceGreedy, \
+    TranslationInferenceGreedySpeculativeUnbatched, \
+    TranslationInferenceNucleusSpeculativeUnbatched
 from utils import NoamLRSchedule, ConstantLRSchedule, calc_token_acc, calc_sequence_acc
 
 
@@ -88,6 +90,19 @@ class TranslationModel(LightningModule):
                 bos_token=self.tgt_bos_token_i,
                 eos_token=self.tgt_eos_token_i
             )
+        elif self.hparams.generation == "nucleus_speculative":
+            self.generator = TranslationInferenceNucleusSpeculativeUnbatched(
+                self.model,
+                max_len=self.hparams.max_len,
+                n_best=self.hparams.n_best,
+                n_speculative_tokens=self.hparams.n_speculative_tokens,
+                temperature=self.hparams.temperature,
+                nucleus=self.hparams.nucleus,
+                pad_token=self.tgt_pad_token_i,
+                bos_token=self.tgt_bos_token_i,
+                eos_token=self.tgt_eos_token_i
+            )
+
         else:
             options = ", ".join(["beam_search", "greedy", "greedy_speculative"])
             raise ValueError(
