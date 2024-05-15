@@ -756,7 +756,7 @@ class TranslationInferenceNucleusSpeculativeUnbatchedMinAccepted:
                      pred_tokens),
                     dim=1
                 )  # (n_best, curr_len), (n_best, min_num_accepted + 1) -> (n_best, new_curr_len)
-                if (generated_tokens == self.eos_token).sum(-1).sum().item() == n_best:
+                if (generated_tokens == self.eos_token).sum(-1).bool().sum().item() == n_best:
                     break
             result[i] =generated_tokens
         return result
