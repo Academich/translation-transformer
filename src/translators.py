@@ -250,7 +250,7 @@ class TranslationInferenceNucleusSpeculativeUnbatched:
         sampled_tokens = sampled_tokens.reshape(n_drafts, curr_len)
         return sampled_tokens
 
-    def generate(self, src: 'torch.LongTensor') -> 'torch.LongTensor':
+    def generate(self, src: 'torch.LongTensor') -> list['torch.LongTensor']:
         b_size, src_len = src.size()
 
         src_pad_mask = (src == self.model.src_pad_token_i).bool()
