@@ -341,10 +341,9 @@ class TranslationInferenceNucleusSpeculativeUnbatched:
             src_unbatched_i_pads = (src_unbatched_i == self.pad_token).int().sum(-1)
             n_tokens_without_pads = src_unbatched_i.size(1) - src_unbatched_i_pads
             src_unbatched_i_unpadded = src_unbatched_i[:, :n_tokens_without_pads]
-            draft_tokens = src_unbatched_i_unpadded.unfold(-1, self.n_speculative_tokens, 1).squeeze(0)
+            drafts = src_unbatched_i_unpadded.unfold(-1, self.n_speculative_tokens, 1).squeeze(0)
             # -> (n_drafts, draft_len)
-            n_drafts = draft_tokens.size(0)
-            draft_tokens = draft_tokens.repeat(self.n_best, 1)  # -> (n_best * n_drafts, 1)
+            n_drafts = drafts.size(0)
             iters = 0
 
             generated_tokens = torch.full((1, 1), self.bos_token).type_as(src).long().repeat(self.n_best, 1)
@@ -355,20 +354,23 @@ class TranslationInferenceNucleusSpeculativeUnbatched:
             while generated_tokens.size(1) < self.max_len:
                 iters += 1
                 n_best, curr_len = generated_tokens.size()
+                draft_tokens = drafts.repeat(n_best, 1)  # -> (n_best * n_drafts, 1)
                 inp = generated_tokens.unsqueeze(1).expand(n_best, n_drafts, curr_len).reshape(n_best * n_drafts,
                                                                                                curr_len)
                 draft_sequence = torch.cat([inp, draft_tokens], dim=1)
                 # (n_best * n_drafts, curr_len), (n_best * n_drafts, draft_len) -> (n_best * n_drafts, curr_len + draft_len)
                 _, seq_len = draft_sequence.size()
                 pos_enc_offset = (draft_sequence == self.pad_token).int().sum(-1).reshape(-1, 1)
-                pred_logits = self.model.decode_tgt(draft_sequence, memory_i, memory_pad_mask=memory_pad_mask_i,
+                pred_logits = self.model.decode_tgt(draft_sequence,
+                                                    memory_i[:n_best * n_drafts, :, :],
+                                                    memory_pad_mask=memory_pad_mask_i[:n_best * n_drafts, :],
                                                     pos_enc_offset=pos_enc_offset)
                 #   -> (n_best * n_drafts, curr_len + draft_len, vocab_size)
 
                 pred_tokens = self.sample(
                     pred_logits)  # (n_best * n_drafts, curr_len + draft_len, vocab_size) -> (n_best * n_drafts, curr_len + draft_len)
 
-                pred_tokens = pred_tokens.reshape(self.n_best, n_drafts, seq_len)
+                pred_tokens = pred_tokens.reshape(n_best, n_drafts, seq_len)
                 pred_tokens = pred_tokens[:, :, -(draft_tokens.size(
                     1) + 1):]  # (n_best, n_drafts, curr_len + draft_len) -> (n_best, n_drafts, draft_len + 1)
                 verification = draft_tokens.reshape(n_best, n_drafts, -1) == pred_tokens[:, :,
@@ -395,13 +397,13 @@ class TranslationInferenceNucleusSpeculativeUnbatched:
                         finished_candidates.append(candidate)
                     else:
                         best_candidates.append(candidate)
-                generated_tokens = pad_sequence(best_candidates, padding_value=self.pad_token, batch_first=True)
 
-                if (generated_tokens == self.eos_token).sum(-1).bool().sum().item() == n_best:
+                if len(best_candidates) == 0:
                     break
+                generated_tokens = pad_sequence(best_candidates, padding_value=self.pad_token, batch_first=True)
                 generated_tokens = move_pads_to_the_left(generated_tokens, self.pad_token)
 
-            result.append(generated_tokens)
+            result.append(pad_sequence(finished_candidates, padding_value=self.pad_token, batch_first=True))
         return result
 
 
