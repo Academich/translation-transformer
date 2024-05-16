@@ -137,7 +137,10 @@ class TranslationInferenceBeamSearch:
                 -1) * self.beam_size  # (beam_width * bs, 1)
             y = y[best_candidates].flatten(end_dim=-2)  # (beam_width * bs, 2+i)
             y = torch.cat((y, next_chars), axis=1)  # (beam_width * bs, 2+i)
-        y = y.reshape(bs, self.beam_size, self.max_len)
+            if (y == self.eos_token).sum(-1).bool().sum().item() == y.size()[0]:
+                break
+        _, curr_len = y.size()
+        y = y.reshape(bs, self.beam_size, curr_len)
         return y  # , probabilities  # (examples,b_w, max_len), (examples,b_w)
 
 
