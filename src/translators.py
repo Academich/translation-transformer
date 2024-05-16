@@ -299,7 +299,7 @@ class TranslationInferenceNucleusSpeculativeUnbatched:
         self.n_best = n_best
 
     def __str__(self):
-        return f"SpeculativeUnbatchedNucleusNew decoding (max_len={self.max_len}, nucleus={self.nucleus}, temperature={self.temperature})"
+        return f"NucleusSpeculativeUnbatched decoding (max_len={self.max_len}, nucleus={self.nucleus}, temperature={self.temperature})"
 
     def sample(self, pred_logits):
         n_drafts, curr_len, vocab_size = pred_logits.size()
@@ -318,7 +318,7 @@ class TranslationInferenceNucleusSpeculativeUnbatched:
         best_candidates_logits = torch.gather(sorted_logits, 1, sorted_indices.argsort(1))
         best_probs = (best_candidates_logits / self.temperature).softmax(-1)
 
-        sampled_tokens = torch.multinomial(best_probs, 1).squeeze(1)  # -> (n_drafts * curr_len, 1) ->
+        sampled_tokens = torch.multinomial(best_probs, 1).squeeze(1)  # -> (n_drafts * curr_len, 1)
         # -> (n_drafts * curr_len)
 
         sampled_tokens = sampled_tokens.reshape(n_drafts, curr_len)
@@ -334,47 +334,74 @@ class TranslationInferenceNucleusSpeculativeUnbatched:
         src_pad_mask_unbatched = src_pad_mask.unsqueeze(1)
         memory_unbatched = memory.unsqueeze(1)
 
-        result = [[] for _ in range(b_size)]
+        result = []
 
         for i in range(b_size):
-            draft_tokens = src_unbatched[i, :, 1:].unfold(-1, self.n_speculative_tokens, 1).squeeze(0)
+            src_unbatched_i = src_unbatched[i, :, 1:]
+            src_unbatched_i_pads = (src_unbatched_i == self.pad_token).int().sum(-1)
+            n_tokens_without_pads = src_unbatched_i.size(1) - src_unbatched_i_pads
+            src_unbatched_i_unpadded = src_unbatched_i[:, :n_tokens_without_pads]
+            draft_tokens = src_unbatched_i_unpadded.unfold(-1, self.n_speculative_tokens, 1).squeeze(0)
+            # -> (n_drafts, draft_len)
             n_drafts = draft_tokens.size(0)
+            draft_tokens = draft_tokens.repeat(self.n_best, 1)  # -> (n_best * n_drafts, 1)
             iters = 0
-            for j in range(self.n_best):
-                generated_tokens = torch.full((1, 1), self.bos_token).type_as(src).long()
-                while generated_tokens.size(1) < self.max_len:
-                    iters += 1
-                    draft_sequence = torch.cat([generated_tokens.repeat(n_drafts, 1), draft_tokens], dim=-1)
-                    #   -> (n_drafts, curr_len)
 
-                    pred_logits = self.model.decode_tgt(draft_sequence,
-                                                        memory_unbatched[i].repeat(n_drafts, 1, 1),
-                                                        memory_pad_mask=src_pad_mask_unbatched[i].repeat(n_drafts, 1))
-                    #   -> (n_drafts, curr_len, vocab_size)
+            generated_tokens = torch.full((1, 1), self.bos_token).type_as(src).long().repeat(self.n_best, 1)
+            # -> (n_best, 1)
+            memory_i = memory_unbatched[i].repeat(n_drafts * self.n_best, 1, 1)
+            memory_pad_mask_i = src_pad_mask_unbatched[i].repeat(n_drafts * self.n_best, 1)
+            finished_candidates = []
+            while generated_tokens.size(1) < self.max_len:
+                iters += 1
+                n_best, curr_len = generated_tokens.size()
+                inp = generated_tokens.unsqueeze(1).expand(n_best, n_drafts, curr_len).reshape(n_best * n_drafts,
+                                                                                               curr_len)
+                draft_sequence = torch.cat([inp, draft_tokens], dim=1)
+                # (n_best * n_drafts, curr_len), (n_best * n_drafts, draft_len) -> (n_best * n_drafts, curr_len + draft_len)
+                _, seq_len = draft_sequence.size()
+                pos_enc_offset = (draft_sequence == self.pad_token).int().sum(-1).reshape(-1, 1)
+                pred_logits = self.model.decode_tgt(draft_sequence, memory_i, memory_pad_mask=memory_pad_mask_i,
+                                                    pos_enc_offset=pos_enc_offset)
+                #   -> (n_best * n_drafts, curr_len + draft_len, vocab_size)
 
-                    pred_tokens = self.sample(pred_logits)  # (n_drafts, curr_len, vocab_size) -> (n_drafts, curr_len)
+                pred_tokens = self.sample(
+                    pred_logits)  # (n_best * n_drafts, curr_len + draft_len, vocab_size) -> (n_best * n_drafts, curr_len + draft_len)
 
-                    pred_tokens = pred_tokens[:, -(draft_tokens.size(1) + 1):]
-                    verification = draft_tokens == pred_tokens[:, :-1]
-                    _range = verification.cumsum(-1)
-                    accepted_in_drafts = (torch.arange(1, verification.size(1) + 1).type_as(_range) == _range)
-                    n_accepted_in_drafts = accepted_in_drafts.sum(-1)
-                    n_accepted_in_drafts = n_accepted_in_drafts.topk(1, -1)
-                    draft_i = n_accepted_in_drafts.indices
-                    n_accepted = n_accepted_in_drafts.values
+                pred_tokens = pred_tokens.reshape(self.n_best, n_drafts, seq_len)
+                pred_tokens = pred_tokens[:, :, -(draft_tokens.size(
+                    1) + 1):]  # (n_best, n_drafts, curr_len + draft_len) -> (n_best, n_drafts, draft_len + 1)
+                verification = draft_tokens.reshape(n_best, n_drafts, -1) == pred_tokens[:, :,
+                                                                             :-1]  # (n_best, n_drafts, draft_len + 1) -> (n_best, n_drafts, draft_len)
+                _range = verification.cumsum(-1)  # (n_best, n_drafts, draft_len)
+                accepted_in_drafts = (torch.arange(1, verification.size(2) + 1).unsqueeze(0).unsqueeze(0).type_as(
+                    _range) == _range)  # (n_best, n_drafts, draft_len)
+                n_accepted_in_drafts = accepted_in_drafts.sum(-1)  # (n_best, n_drafts, draft_len) -> (n_best, n_drafts)
+                n_accepted_in_drafts = n_accepted_in_drafts.topk(1, dim=-1)  # (n_best, n_drafts) -> (n_best, 1)
+                draft_i = n_accepted_in_drafts.indices  # (n_best, 1)
+                n_accepted = n_accepted_in_drafts.values  # (n_best, 1)
 
-                    pred_tokens = pred_tokens[draft_i, :n_accepted + 1]
+                # min_num_accepted = torch.min(n_accepted).item()
+                best_candidates = []
+                for j in range(n_best):
+                    min_accepted_in_j = n_accepted[j]
+                    draft_id = draft_i[j]
+                    pred_tokens_for_j = pred_tokens[j, draft_id, :min_accepted_in_j + 1]  # -> (min_accepted_in_i + 1)
+                    initial = generated_tokens[j].unsqueeze(0)  # (n_best, curr_len) -> (curr_len)
+                    pads_in_initial = (initial == self.pad_token).int().sum(-1)
+                    initial = initial[:, pads_in_initial:]
+                    candidate = torch.cat((initial, pred_tokens_for_j), dim=-1).squeeze(0)
+                    if (candidate == self.eos_token).sum().item() > 0:
+                        finished_candidates.append(candidate)
+                    else:
+                        best_candidates.append(candidate)
+                generated_tokens = pad_sequence(best_candidates, padding_value=self.pad_token, batch_first=True)
 
-                    generated_tokens = torch.cat(
-                        (generated_tokens,
-                         pred_tokens),
-                        dim=1
-                    )
-                    if (generated_tokens == self.eos_token).sum(-1).item() > 0:
-                        break
-                result[i].append(generated_tokens.squeeze(0))
-            result[i] = pad_sequence(result[i], padding_value=0, batch_first=True)
+                if (generated_tokens == self.eos_token).sum(-1).bool().sum().item() == n_best:
+                    break
+                generated_tokens = move_pads_to_the_left(generated_tokens, self.pad_token)
 
+            result.append(generated_tokens)
         return result
 
 
