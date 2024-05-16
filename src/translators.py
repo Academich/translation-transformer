@@ -1,5 +1,3 @@
-from heapq import heappush, heappop
-
 import torch
 from torch.nn.utils.rnn import pad_sequence
 
@@ -50,20 +48,6 @@ class TranslationInferenceGreedy:
                                  pred_token == self.pad_token)).sum().item() == b_size:
                 break
         return torch.cat([i.unsqueeze(0) for i in generated_tokens.unsqueeze(1)], dim=0)
-
-
-class BeamSearchNode:
-    def __init__(self, decoder_inp, logprob, length):
-        self.decoder_inp = decoder_inp
-        self.logprob = logprob
-        self.length = length  # nonpad_length
-
-    def eval(self):
-        return self.logprob / float(self.length - 1 + 1e-6)
-
-    # overload < operator
-    def __lt__(self, other):
-        return self.eval() < other.eval()
 
 
 class TranslationInferenceBeamSearch:
@@ -214,64 +198,6 @@ def move_pads_to_the_left(arr, pad_token=0):
     eos_index = (arr == pad_token).sum(1)
     indices = (dim_indices - eos_index.unsqueeze(1)) % arr.shape[1]
     return torch.gather(arr, dim=1, index=indices)
-
-
-def copy_sequence_draft(source: torch.LongTensor, prediction: torch.LongTensor, pad_token=0):
-    # TODO Fails if a source sequence is copied to the target entirely
-    B, L = source.size()
-    first_divergent_index = (prediction != source).int().argmax(-1).unsqueeze(1)
-    accept_mask = torch.arange(L).repeat(B).reshape(B, L).type_as(source) >= first_divergent_index
-    draft_accepted = source.masked_fill(accept_mask, pad_token)
-    draft_accepted_repadded = move_pads_to_the_left(draft_accepted, pad_token)
-    position_offset = (draft_accepted_repadded == pad_token).int().sum(-1)
-    return draft_accepted_repadded, position_offset.unsqueeze(1)
-
-
-class TranslationInferenceGreedyWithCopyBatched:
-    # TODO Slower than greedy with large batch sizes if a batch is bottlenecked by an unlucky sequence
-
-    def __init__(self,
-                 model,  # TranslationModel
-                 max_len: int,
-                 pad_token: int,
-                 bos_token: int,
-                 eos_token: int) -> None:
-        self.model = model
-        self.max_len = max_len
-        self.pad_token = pad_token
-        self.bos_token = bos_token
-        self.eos_token = eos_token
-
-    def __str__(self):
-        return f"Greedy decoding (max_len={self.max_len})"
-
-    def generate(self, src: 'torch.LongTensor') -> 'torch.LongTensor':
-        b_size = src.size()[0]
-        generated_tokens = torch.full((b_size, 1), self.pad_token)
-        generated_tokens[:, 0] = self.bos_token
-        generated_tokens = generated_tokens.type_as(src).long()
-
-        src_pad_mask = (src == self.model.src_pad_token_i).bool()
-        memory = self.model.encode_src(src, src_pad_mask)
-
-        draft = src
-        draft_verification = self.model.decode_tgt(draft, memory, memory_pad_mask=src_pad_mask).argmax(dim=2)[:, :-1]
-        draft_verification = torch.cat([generated_tokens, draft_verification], dim=-1)
-        generated_tokens, pos_emb_offset = copy_sequence_draft(draft, draft_verification, pad_token=self.pad_token)
-
-        for _ in range(self.max_len - generated_tokens.shape[1]):
-            pred_logits = self.model.decode_tgt(generated_tokens, memory, memory_pad_mask=src_pad_mask,
-                                                pos_enc_offset=pos_emb_offset)
-            pred_token = torch.argmax(pred_logits, dim=2)[:, -1:]
-            generated_tokens = torch.cat(
-                (generated_tokens,
-                 pred_token),
-                dim=1
-            )
-            if (torch.logical_or(pred_token == self.eos_token,
-                                 pred_token == self.pad_token)).sum().item() == b_size:
-                break
-        return torch.cat([i.unsqueeze(0) for i in generated_tokens.unsqueeze(1)], dim=0)
 
 
 class TranslationInferenceNucleusSpeculativeUnbatched:
