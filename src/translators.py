@@ -762,6 +762,25 @@ class TranslationInferenceNucleusSpeculativeUnbatchedMinAccepted:
         return result
 
 
+def multinomial(probs, samples_num_coeff):
+    num_samples = 12 * samples_num_coeff
+    mask = probs <= 0.0001
+    probs_num, vocab_size = mask.size()
+    inds_num_t = torch.ones(probs_num, vocab_size).masked_fill_(mask, -float("inf")).softmax(-1) * num_samples
+    inds_num_t = inds_num_t.int()
+
+    tmp_t = inds_num_t.unsqueeze(-1).expand(probs_num, vocab_size, num_samples)
+    mask_for_all_inds = (tmp_t - torch.arange(num_samples).unsqueeze(0).unsqueeze(
+        0)) > 0  # (probs_num, vocab_size, num_samples)
+    all_inds_for_all = torch.arange(1, vocab_size + 1).unsqueeze(0).unsqueeze(-1)  # -> (1, vocab_size, 1)
+    masked_inds_for_all = (all_inds_for_all * mask_for_all_inds)  # ->(probs_num, vocab_size, num_samples)
+    inds_for_all_probs = masked_inds_for_all[masked_inds_for_all > 0].reshape(probs_num,
+                                                                              num_samples) - 1  # Надо, чтобы функция это выдавала
+
+    tmp_indexes = torch.multinomial(torch.ones(num_samples).softmax(-1).repeat(probs_num, 1), num_samples,
+                                    replacement=False)  # (probs_num, num_samples)
+    return torch.gather(inds_for_all_probs, 1, tmp_indexes)  # (probs_num, num_samples)
+
 
 if __name__ == '__main__':
     from tests.mock_model import MockCopySequence
