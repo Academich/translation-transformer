@@ -128,6 +128,85 @@ class TranslationInferenceBeamSearch:
         return y  # , probabilities  # (examples,b_w, max_len), (examples,b_w)
 
 
+class TranslationInferenceGreedySpeculative:
+    """
+    Supposed to be faster than TranslationInferenceGreedySpeculativeUnbatched because it supports batching.
+    But isn't for some reason.
+    """
+
+    def __init__(self,
+                 model,  # TranslationModel
+                 max_len: int,
+                 n_speculative_tokens: int,
+                 pad_token: int,
+                 bos_token: int,
+                 eos_token: int) -> None:
+        self.model = model
+        self.max_len = max_len
+        self.pad_token = pad_token
+        self.bos_token = bos_token
+        self.eos_token = eos_token
+
+        self.n_speculative_tokens = n_speculative_tokens
+
+    def __str__(self):
+        return f"Greedy speculative decoding (n_speculative_tokens={self.n_speculative_tokens}, max_len={self.max_len})"
+
+    def generate(self, src: 'torch.LongTensor') -> 'torch.LongTensor':
+        b_size, src_len = src.size()
+
+        src_pad_mask = (src == self.model.src_pad_token_i).bool()
+        memory = self.model.encode_src(src, src_pad_mask)
+
+        generated_tokens = torch.full((b_size, 1), self.bos_token).type_as(src).long()
+        draft_tokens = src[:, 1:].unfold(-1, self.n_speculative_tokens, 1)
+        n_drafts = draft_tokens.size(1)
+        iters = 0
+        while generated_tokens.size(1) < self.max_len:
+            iters += 1
+            draft_sequence = torch.cat([generated_tokens.unsqueeze(1).repeat(1, n_drafts, 1), draft_tokens],
+                                       dim=-1).reshape(b_size * n_drafts, -1)
+            pos_enc_offset = (draft_sequence == -1).int().sum(-1).reshape(-1, 1)
+            generated_tokens = generated_tokens.masked_fill(generated_tokens == -1, self.pad_token)
+            draft_sequence = draft_sequence.masked_fill(draft_sequence == -1, self.pad_token)
+
+            pred_logits = self.model.decode_tgt(draft_sequence,
+                                                memory.unsqueeze(1).repeat(1, n_drafts, 1, 1).reshape(b_size * n_drafts,
+                                                                                                      -1, 256),
+                                                memory_pad_mask=src_pad_mask.unsqueeze(1).repeat(1, n_drafts, 1).view(
+                                                    b_size * n_drafts, -1),
+                                                pos_enc_offset=pos_enc_offset)
+            pred_tokens = torch.argmax(pred_logits, dim=2)
+            pred_tokens = pred_tokens[:, -(self.n_speculative_tokens + 1):]
+            verification = draft_tokens.reshape(b_size * n_drafts, -1) == pred_tokens[:, :-1]
+            _range = verification.cumsum(-1)
+            accepted_in_drafts = (torch.arange(1, verification.size(1) + 1).type_as(_range) == _range)
+            n_accepted_in_drafts = accepted_in_drafts.sum(-1)
+            n_accepted_in_drafts = n_accepted_in_drafts.reshape(b_size, n_drafts)
+            n_accepted_in_drafts = n_accepted_in_drafts.topk(1, -1)
+            draft_i = n_accepted_in_drafts.indices
+            n_accepted = n_accepted_in_drafts.values
+            pred_tokens = pred_tokens.reshape(b_size, n_drafts, -1)
+
+            chosen = torch.gather(pred_tokens, 1,
+                                  draft_i.unsqueeze(-1).expand(b_size, 1, pred_tokens.size(-1))).squeeze(1)
+            pred_tokens = chosen.masked_fill(torch.arange(pred_tokens.size(-1)).type_as(n_accepted) > n_accepted, -1)
+
+            generated_tokens = torch.cat(
+                (generated_tokens,
+                 pred_tokens),
+                dim=1
+            )
+            generated_tokens = move_pads_to_the_left(generated_tokens, -1)
+            generated_tokens = generated_tokens.masked_fill(generated_tokens == self.pad_token, -1)
+            generated_tokens = generated_tokens[:, ((generated_tokens == -1).sum(
+                dim=0) == b_size).sum():]  # Strip columns on the left that are all pads
+            if (generated_tokens == self.eos_token).sum(-1).bool().sum().item() == b_size:
+                break
+        generated_tokens = generated_tokens.masked_fill(generated_tokens == -1, self.pad_token)
+        return generated_tokens.unsqueeze(1)
+
+
 class TranslationInferenceGreedySpeculativeUnbatched:
 
     def __init__(self,
