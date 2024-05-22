@@ -7,6 +7,280 @@ import torch
 # Batch size: B
 # Current length: L
 
+class TranslationInferenceNucleusSpeculativeUnbatchedNoCycles:
+
+    def __init__(self,
+                 model,  # TranslationModel
+                 max_len: int,
+                 n_speculative_tokens: int,
+                 pad_token: int,
+                 bos_token: int,
+                 eos_token: int,
+                 n_best: int = 5,
+                 temperature: float = 1.,
+                 nucleus: float = 0.995
+                 ) -> None:
+        self.model = model
+        self.max_len = max_len
+        self.pad_token = pad_token
+        self.bos_token = bos_token
+        self.eos_token = eos_token
+
+        self.n_speculative_tokens = n_speculative_tokens
+        self.nucleus = nucleus
+        self.temperature = temperature
+        self.n_best = n_best
+
+    def __str__(self):
+        return f"NucleusSpeculativeUnbatched decoding (max_len={self.max_len}, nucleus={self.nucleus}, temperature={self.temperature})"
+
+    def sample(self, pred_logits, num_samples):
+        n, curr_len, vocab_size = pred_logits.size()  # (n_candidates * n_drafts, draft_len + 1, vocab_size)
+        pred_logits = pred_logits.reshape(n * curr_len, vocab_size)  # -> (n * curr_len, vocab_size)
+        predicted_log_probs = pred_logits.softmax(-1).log()
+
+        # actually we don't need to generate the pad token
+        logits_for_sampling = pred_logits
+        logits_for_sampling[:, self.pad_token] = -float("inf")
+
+        sorted_logits, sorted_indices = torch.sort(logits_for_sampling, descending=True)  # -> (n * curr_len, vocab_size)
+        cumulative_probs = torch.cumsum(sorted_logits.softmax(-1), dim=-1)  # -> (n * curr_len, vocab_size)
+
+        # Remove tokens with cumulative probability above the threshold
+        cumulative_probs = torch.roll(cumulative_probs, 1, dims=-1)
+        cumulative_probs[:, 0] = 0
+        keep_candidates_mask = cumulative_probs < self.nucleus  # -> (n * curr_len, vocab_size)
+        keep_candidates_mask[:, :2] = True   # this is temporary decision. we just take the top 2 for sampling.
+        keep_candidates_mask[:, 2:] = False  # function "multinomial" supports no more than 4 positions
+        sorted_logits.masked_fill_(~keep_candidates_mask, float("-inf"))
+
+        best_candidates_logits_for_sampling = torch.gather(sorted_logits, 1, sorted_indices.argsort(1))
+        # -> (n * curr_len, vocab_size)
+
+        best_probs_for_sampling = (best_candidates_logits_for_sampling / self.temperature).softmax(-1)
+
+        assert num_samples % 12 == 0
+        sampled_tokens = multinomial(best_probs_for_sampling, num_samples // 12)  # -> (n * curr_len, num_samples)
+        line_log_probs = torch.gather(predicted_log_probs, dim=1, index=sampled_tokens)  # -> (n * curr_len, num_samples)
+
+        sampled_tokens = sampled_tokens.reshape(n, curr_len, num_samples)  # ->(n, draft_len + 1, num_samples)
+        line_log_probs = line_log_probs.reshape(n, curr_len, num_samples)  # ->(n, draft_len + 1, num_samples)
+        return sampled_tokens, line_log_probs
+
+    def generate(self, src: 'torch.LongTensor') -> list['torch.LongTensor']:
+        b_size, src_len = src.size()
+
+        src_pad_mask = (src == self.model.src_pad_token_i).bool()
+        memory = self.model.encode_src(src, src_pad_mask)
+
+        src_unbatched = src.unsqueeze(1)
+        src_pad_mask_unbatched = src_pad_mask.unsqueeze(1)
+        memory_unbatched = memory.unsqueeze(1)
+
+        result = []
+
+        for i in range(b_size):
+            src_unbatched_i = src_unbatched[i, :, 1:]
+            src_unbatched_i_pads = (src_unbatched_i == self.pad_token).int().sum(-1)
+            n_tokens_without_pads = src_unbatched_i.size(1) - src_unbatched_i_pads
+            src_unbatched_i_unpadded = src_unbatched_i[:, :n_tokens_without_pads]
+            drafts = src_unbatched_i_unpadded.unfold(-1, self.n_speculative_tokens, 1).squeeze(0)[:100, :]
+            # -> (n_drafts, draft_len)
+            n_drafts, draft_len = drafts.size()
+            iters = 0
+
+            generated_tokens = torch.full((1, 1), self.bos_token).type_as(src).long()
+            # -> (1, 1)
+            memory_i = memory_unbatched[i].repeat(n_drafts, 1, 1)
+            memory_pad_mask_i = src_pad_mask_unbatched[i].repeat(n_drafts, 1)
+
+            finished_candidates_t = None
+
+            candidates_log_probs = torch.zeros(1).to(src.device)  # (n_candidates)
+            candidates_len_t = torch.ones(1).to(src.device)  # (n_candidates)
+            while generated_tokens.size(1) < self.max_len:
+                iters += 1
+                n_candidates, curr_len = generated_tokens.size()
+                draft_tokens = drafts.repeat(n_candidates, 1)  # -> (n_candidates * n_drafts, 1)
+                inp = generated_tokens.unsqueeze(1).expand(n_candidates, n_drafts, curr_len).reshape(
+                    n_candidates * n_drafts,
+                    curr_len)
+                draft_sequence = torch.cat([inp, draft_tokens], dim=1)
+                # (n_candidates * n_drafts, curr_len + draft_len)
+                _, seq_len = draft_sequence.size()
+                pos_enc_offset = (draft_sequence == self.pad_token).int().sum(-1).reshape(-1, 1)
+                # pred_logits = self.model.decode_tgt(draft_sequence, memory_i.repeat(n_candidates, 1, 1),
+                #                                     memory_pad_mask=memory_pad_mask_i.repeat(n_candidates, 1),
+                #                                     pos_enc_offset=pos_enc_offset)
+                pred_logits = self.model.decode_tgt(draft_sequence, memory_i.repeat(n_candidates, 1, 1),
+                                                    memory_pad_mask=memory_pad_mask_i.repeat(n_candidates, 1))
+                #   -> (n_candidates * n_drafts, curr_len + draft_len, vocab_size)
+
+                num_samples = 24
+                pred_tokens, draft_log_probs = self.sample(
+                    pred_logits[:, -(draft_len +
+                                     1):, :], num_samples)  # (n_candidates * n_drafts, draft_len + 1, vocab_size) ->
+                # -> (n_candidates * n_drafts,  draft_len + 1, num_samples),
+                # (n_candidates * n_drafts, draft_len + 1, num_samples)
+
+                pred_tokens = pred_tokens.reshape(n_candidates, n_drafts, draft_len + 1, num_samples)
+                # -> (n_candidates, n_drafts, draft_len + 1, num_samples)
+                draft_log_probs = draft_log_probs.reshape(n_candidates, n_drafts, draft_len + 1, num_samples)
+
+                pred_tokens = pred_tokens.transpose(2, 3).transpose(1, 2).transpose(0, 1)
+                #   -> (num_samples, n_candidates, n_drafts, draft_len + 1)
+                draft_log_probs = draft_log_probs.transpose(2, 3).transpose(1, 2).transpose(0, 1)
+                #   -> (num_samples, n_candidates, n_drafts, draft_len + 1)
+
+                pred_tokens = pred_tokens.reshape(num_samples * n_candidates, n_drafts, draft_len + 1)
+                #   -> (num_samples * n_candidates, n_drafts, draft_len + 1)
+                draft_log_probs = draft_log_probs.reshape(num_samples * n_candidates, n_drafts, draft_len + 1)
+                #   -> (num_samples * n_candidates, n_drafts, draft_len + 1)
+
+                num = num_samples * n_candidates
+
+                verification = draft_tokens.reshape(
+                    n_candidates,
+                    n_drafts,
+                    -1).unsqueeze(0).expand(num_samples,
+                                            n_candidates,
+                                            n_drafts,
+                                            -1).reshape(num,
+                                                        n_drafts,
+                                                        -1) == pred_tokens[:, :, :-1]
+                _range = verification.cumsum(-1)  # (num, n_drafts, draft_len)
+                accepted_in_drafts_bool = (torch.arange(1, verification.size(2) + 1).unsqueeze(0).unsqueeze(0).type_as(
+                    _range) == _range)  # (num, n_drafts, draft_len)
+                extra_pad = -1
+                pred_tokens[:, :, 1:].masked_fill_(~accepted_in_drafts_bool, extra_pad)
+                #   (num_samples * n_candidates, n_drafts, draft_len + 1)
+                draft_log_probs[:, :, 1:].masked_fill_(~accepted_in_drafts_bool, 0.)
+                #   (num_samples * n_candidates, n_drafts, draft_len + 1)
+                accepted_tokens_len = accepted_in_drafts_bool.sum(-1)
+                # -> (num, n_drafts, draft_len)
+
+                tmp_ids = torch.arange(num).type_as(src) % n_candidates
+                initial_tokens = generated_tokens[tmp_ids]
+                #   -> (num_samples * n_candidates, curr_len)
+                initial_log_probs = candidates_log_probs[tmp_ids]
+                #   -> (num_samples * n_candidates)
+                initial_len_t = candidates_len_t[tmp_ids]
+                #   -> (num_samples * n_candidates)
+
+
+                new_candidates = torch.cat((initial_tokens.unsqueeze(1).expand(num, n_drafts, curr_len),
+                                            pred_tokens), dim=-1).reshape(num * n_drafts, -1)
+                #   -> (num_samples * n_candidates * n_draft, curr_len + draft_len + 1)
+                new_log_probs = (initial_log_probs.unsqueeze(1).expand(num, n_drafts) + draft_log_probs.sum(-1)).reshape(num * n_drafts)
+                #   -> (num_samples * n_candidates * n_draft)
+                new_len_t = (initial_len_t.unsqueeze(1) + accepted_tokens_len).reshape(num * n_drafts) + 1
+
+                new_candidates, new_log_probs, new_len_t = self.unique_and_sort_with_len_adjusting(new_candidates, new_log_probs, new_len_t)
+
+                new_candidates = new_candidates[:self.n_best]
+                new_log_probs = new_log_probs[:self.n_best]
+                new_len_t = new_len_t[:self.n_best]
+
+                new_candidates = move_pads_to_the_left(new_candidates, extra_pad)
+                #   -> (num_samples * n_candidates, curr_len + draft_len + 1)
+
+                new_candidates.masked_fill_(new_candidates == extra_pad, self.pad_token)  # all pads will be at the left
+                new_candidates = new_candidates[:, ((new_candidates == self.pad_token).sum(0) == num).sum():]
+
+                finished_bool_ids = (new_candidates == self.eos_token).sum(-1).bool()
+                #   -> (num_samples * n_candidates)
+
+                num_new_finished = finished_bool_ids.sum().item()
+
+                if num_new_finished > 0:
+                    new_finished_candidates = new_candidates[finished_bool_ids]
+                    _, tokens_num = new_finished_candidates.size()
+                    pad_tail = torch.full((num_new_finished, self.max_len - tokens_num),
+                                          self.pad_token).type_as(src)
+                    new_finished_candidates = torch.cat((pad_tail, new_finished_candidates), dim=1)
+                    #   -> (num_new_finished, max_len)
+                    new_finished_log_probs_t = new_log_probs[finished_bool_ids] / new_len_t[finished_bool_ids]
+                    #   -> (num_new_finished)
+
+                    if finished_candidates_t is None:
+                        finished_candidates_t = new_finished_candidates
+
+                        finished_candidates_log_probs_t = new_finished_log_probs_t
+                    else:
+                        finished_candidates_t = torch.cat((finished_candidates_t, new_finished_candidates), dim=0)
+
+                        finished_candidates_log_probs_t = torch.cat((finished_candidates_log_probs_t,
+                                                                     new_finished_log_probs_t), dim=0)
+
+                    if finished_candidates_t.size()[0] >= self.n_best:
+                        finished_candidates_t, finished_candidates_log_probs_t = \
+                            self.unique_and_sort(finished_candidates_t, finished_candidates_log_probs_t,
+                                                 descending=True)
+                        finished_candidates_t = finished_candidates_t[:self.n_best]
+                        finished_candidates_log_probs_t = finished_candidates_log_probs_t[:self.n_best]
+                        break
+
+                generated_tokens = new_candidates[~finished_bool_ids]
+                candidates_log_probs = new_log_probs[~finished_bool_ids]
+                candidates_len_t = new_len_t[~finished_bool_ids]
+
+                if generated_tokens.size()[0] == 0:
+                    finished_candidates_t, finished_candidates_log_probs_t = \
+                        self.unique_and_sort(finished_candidates_t, finished_candidates_log_probs_t,
+                                             descending=True)
+                    finished_candidates_t = finished_candidates_t[:self.n_best]
+                    finished_candidates_log_probs_t = finished_candidates_log_probs_t[:self.n_best]
+                    break
+
+                generated_tokens = generated_tokens[:,
+                                   ((generated_tokens == self.pad_token).sum(0) == generated_tokens.size()[0]).sum():]
+
+            result.append(finished_candidates_t)  # (n, max_len)
+        return result
+
+    def unique_and_sort_with_len_adjusting(self, generated_tokens, best_candidates_log_probs, len_t, descending=True):
+        generated_tokens_and_probs = torch.cat(
+            [generated_tokens, best_candidates_log_probs.unsqueeze(1)], dim=-1)
+        #   -> (m, new_curr_len+1)
+
+        generated_tokens_and_probs_and_len = torch.cat(
+            [generated_tokens_and_probs, len_t.unsqueeze(1)], dim=-1)
+
+        unique_generated_tokens_and_probs_and_len = torch.unique(generated_tokens_and_probs_and_len, dim=0)
+        # -> (new_n_candidates, new_curr_len+1+1)
+
+        unique_generated_tokens_log_probs = unique_generated_tokens_and_probs_and_len[:, -2]
+        # -> (new_n_candidates)
+
+        unique_generated_tokens_len = unique_generated_tokens_and_probs_and_len[:, -1]
+        # -> (new_n_candidates)
+
+        unique_generated_tokens = unique_generated_tokens_and_probs_and_len[:, :-2].long()
+        # -> (new_n_candidates, new_curr_len)
+
+        sorted_log_probs, sorted_inds = (unique_generated_tokens_log_probs / unique_generated_tokens_len).sort(descending=descending)
+
+        return unique_generated_tokens[sorted_inds], unique_generated_tokens_log_probs[sorted_inds], unique_generated_tokens_len[sorted_inds]
+
+    def unique_and_sort(self, generated_tokens, best_candidates_log_probs, descending=True):
+        generated_tokens_and_probs = torch.cat(
+            [generated_tokens, best_candidates_log_probs.unsqueeze(1)], dim=-1)
+        #   -> (m, new_curr_len+1)
+
+        unique_generated_tokens_and_probs = torch.unique(generated_tokens_and_probs, dim=0)
+        # -> (new_n_candidates, new_curr_len+1)
+
+        unique_generated_tokens_log_probs = unique_generated_tokens_and_probs[:, -1]
+        # -> (new_n_candidates)
+
+        unique_generated_tokens = unique_generated_tokens_and_probs[:, :-1].long()
+        # -> (new_n_candidates, new_curr_len)
+
+        sorted_log_probs, sorted_inds = unique_generated_tokens_log_probs.sort(descending=descending)
+
+        generated_tokens = unique_generated_tokens[sorted_inds]
+        return generated_tokens, sorted_log_probs
+
 class TranslationInferenceBeamSearchOurs:
 
     def __init__(self,
