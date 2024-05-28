@@ -157,13 +157,17 @@ class TranslationInferenceGreedySpeculative:
 
         src_pad_mask = (src == self.model.src_pad_token_i).bool()
         memory = self.model.encode_src(src, src_pad_mask)
+        voc_size = memory.size(2)
 
         generated_tokens = torch.full((b_size, 1), self.bos_token).type_as(src).long()
         draft_tokens = src[:, 1:].unfold(-1, self.n_speculative_tokens, 1)
         n_drafts = draft_tokens.size(1)
         iters = 0
+        finished_predictions = torch.full((b_size, self.max_len), self.pad_token)
+        batch_indices = torch.arange(b_size).type_as(src)
         while generated_tokens.size(1) < self.max_len:
             iters += 1
+            b_size = batch_indices.size(0)
             draft_sequence = torch.cat([generated_tokens.unsqueeze(1).repeat(1, n_drafts, 1), draft_tokens],
                                        dim=-1).reshape(b_size * n_drafts, -1)
             pos_enc_offset = (draft_sequence == -1).int().sum(-1).reshape(-1, 1)
@@ -172,7 +176,7 @@ class TranslationInferenceGreedySpeculative:
 
             pred_logits = self.model.decode_tgt(draft_sequence,
                                                 memory.unsqueeze(1).repeat(1, n_drafts, 1, 1).reshape(b_size * n_drafts,
-                                                                                                      -1, 256),
+                                                                                                      -1, voc_size),
                                                 memory_pad_mask=src_pad_mask.unsqueeze(1).repeat(1, n_drafts, 1).view(
                                                     b_size * n_drafts, -1),
                                                 pos_enc_offset=pos_enc_offset)
@@ -197,14 +201,38 @@ class TranslationInferenceGreedySpeculative:
                  pred_tokens),
                 dim=1
             )
+
+            current_finished_mask = (generated_tokens == self.eos_token).sum(-1).bool()  # (<=b_sz)
+            current_finished_ids = current_finished_mask.nonzero().ravel()
+            if current_finished_ids.nelement() > 0:
+                current_continuing_mask = ~current_finished_mask
+                batch_finished_indices = batch_indices[current_finished_mask]
+
+                current_finished_tokens = generated_tokens[current_finished_ids]
+                current_finished_tokens = move_pads_to_the_right(current_finished_tokens)
+                current_finished_tokens = current_finished_tokens.masked_fill(current_finished_tokens == -1,
+                                                                              self.pad_token)
+                current_finished_tokens = current_finished_tokens[:, :-(
+                            (current_finished_tokens == self.pad_token).sum(dim=0) == current_finished_tokens.size(
+                        0)).sum()]
+
+                finished_predictions[batch_finished_indices, :current_finished_tokens.size(1)] = current_finished_tokens
+
+                batch_indices = batch_indices[current_continuing_mask]
+
+                generated_tokens = generated_tokens[current_continuing_mask]
+                draft_tokens = draft_tokens[current_continuing_mask]
+                memory = memory[current_continuing_mask]
+                src_pad_mask = src_pad_mask[current_continuing_mask]
+            if batch_indices.nelement() == 0:
+                break
+
             generated_tokens = move_pads_to_the_left(generated_tokens, -1)
             generated_tokens = generated_tokens.masked_fill(generated_tokens == self.pad_token, -1)
             generated_tokens = generated_tokens[:, ((generated_tokens == -1).sum(
                 dim=0) == b_size).sum():]  # Strip columns on the left that are all pads
-            if (generated_tokens == self.eos_token).sum(-1).bool().sum().item() == b_size:
-                break
-        generated_tokens = generated_tokens.masked_fill(generated_tokens == -1, self.pad_token)
-        return generated_tokens.unsqueeze(1)
+
+        return finished_predictions.unsqueeze(1)
 
 
 class TranslationInferenceGreedySpeculativeUnbatched:
@@ -272,10 +300,19 @@ class TranslationInferenceGreedySpeculativeUnbatched:
         return pad_sequence(result, padding_value=self.pad_token, batch_first=True).unsqueeze(1)
 
 
+def move_pads_to_the_right(arr, pad_token=0):
+    n_rows, n_cols = arr.size()
+    dim_indices = torch.arange(n_cols).type_as(arr).long().repeat(n_rows).reshape(n_rows, -1)
+    pad_count = (arr == pad_token).sum(1)
+    indices = (dim_indices + pad_count.unsqueeze(1)) % n_cols
+    return torch.gather(arr, dim=1, index=indices)
+
+
 def move_pads_to_the_left(arr, pad_token=0):
-    dim_indices = torch.arange(arr.shape[1]).type_as(arr).long().repeat(arr.shape[0]).reshape(arr.shape[0], -1)
+    n_rows, n_cols = arr.size()
+    dim_indices = torch.arange(n_cols).type_as(arr).long().repeat(n_rows).reshape(n_rows, -1)
     eos_index = (arr == pad_token).sum(1)
-    indices = (dim_indices - eos_index.unsqueeze(1)) % arr.shape[1]
+    indices = (dim_indices - eos_index.unsqueeze(1)) % n_cols
     return torch.gather(arr, dim=1, index=indices)
 
 
