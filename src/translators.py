@@ -1201,6 +1201,116 @@ def multinomial(probs, samples_num_coeff):
                                     replacement=False)  # (probs_num, num_samples)
     return torch.gather(inds_for_all_probs, 1, tmp_indexes)  # (probs_num, num_samples)
 
+class TranslationInferenceNucleusClassic:
+
+    def __init__(self,
+                 model,  # TranslationModel
+                 beam_size: int,
+                 n_best: int,
+                 max_len: int,
+                 pad_token: int,
+                 bos_token: int,
+                 eos_token: int):
+        self.model = model
+        self.beam_size = beam_size
+        self.max_len = max_len
+        self.pad_token = pad_token
+        self.bos_token = bos_token
+        self.eos_token = eos_token
+        self.nucleus = 0.995
+        assert self.beam_size >= self.n_best
+        assert self.max_len > 1
+
+    def sample(self, next_token_pred_logits, current_lines, current_log_probs):
+        """
+        """
+        b_sz, n_candidates, curr_len = current_lines.size()
+        b_sz, n_candidates = current_log_probs.size()
+        b_sz, n_candidates, vocab_size = next_token_pred_logits.size()  # (b_sz, n_candidates, vocab_size)
+
+        potential_log_probs = next_token_pred_logits.softmax(-1).log() + current_log_probs.unsqueeze(-1)
+        #    -> (b_sz, n_candidates, vocab_size)
+
+        logits_for_sampling = next_token_pred_logits.reshape(-1, vocab_size)  # -> (b_sz * n_candidates, vocab_size)
+
+        # actually we don't need to generate the pad token but it can change final
+        # log_prob for the lines that already have eos
+        #logits_for_sampling[:, self.pad_token] = -float("inf")
+
+        sorted_logits, sorted_indices = torch.sort(logits_for_sampling,
+                                                   descending=True)  # -> (n, vocab_size)
+        cumulative_probs = torch.cumsum(sorted_logits.softmax(-1), dim=-1)  # -> (n, vocab_size)
+
+        # Remove tokens with cumulative probability above the threshold
+        keep_candidates_mask = cumulative_probs < self.nucleus  # -> (n, vocab_size)
+        # To sample at least one token
+        keep_candidates_mask[:, 0] = True
+        keep_candidates_mask[:, 1] = True
+        # To avoid sampling more than beam_size indexes
+        keep_candidates_mask[:, 2 * self.beam_size:] = False
+
+        best_candidates_inds_for_sampling_bool = torch.gather(keep_candidates_mask, 1, sorted_indices.argsort(1))
+        # -> (b_sz * n_candidates, vocab_size)
+
+        assert b_sz == 1
+        best_log_probs = potential_log_probs.reshape(-1, vocab_size)[best_candidates_inds_for_sampling_bool]
+        # -> (num_samples)
+        corresponding_lines_inds, best_next_inds = best_candidates_inds_for_sampling_bool.nonzero(as_tuple=True)
+        #   -> (num_samples)
+
+        sorted_log_probs, sorted_indices = torch.sort(best_log_probs, descending=True)  # -> (num_samples)
+        # We keep only the beam_width best probs:
+        best_log_probs = sorted_log_probs[:self.beam_size]  # -> (1>=new_n_candidates<=beam_width)
+        new_n_candidates = best_log_probs.size()[0]
+        best_indices = best_next_inds[sorted_indices[:self.beam_size]]  # -> (new_n_candidates)
+        corresponding_lines_inds = corresponding_lines_inds[sorted_indices[:self.beam_size]]
+        #   -> (new_n_candidates)
+        new_lines = torch.cat((current_lines[0][corresponding_lines_inds], best_indices.reshape(new_n_candidates, 1)),
+                              dim=-1)
+        #   -> (new_n_candidates, curr_len+1)
+
+        # To imitate b_sz at this stage of code development
+        new_lines = new_lines.unsqueeze(0)
+        best_log_probs = best_log_probs.unsqueeze(0)
+        return new_lines, best_log_probs  # (1, new_n_candidates, curr_len+1), (1, new_n_candidates)
+
+    def __str__(self):
+        return f"Beam search decoding (beam_size={self.beam_size}, n_best={self.n_best}, max_len={self.max_len})"
+
+    def generate(self, src: 'torch.LongTensor') -> 'torch.LongTensor':
+        bs, _ = src.size()
+        assert bs == 1
+        # Prepare first tokens for decoder (bs, max_len)
+        n_candidates = 1
+        y = torch.tensor([self.bos_token]).repeat(bs, 1).long().type_as(src)  # -> (bs,n_candidates=1)
+        current_log_probs = torch.tensor([0]).repeat(bs, 1).type_as(src).float()  # -> (bs, n_candidates=1)
+
+        # Decode for one step using decoder
+        decoder_output = self.model(src, y)  # -> (bs, 1, dict_len)
+        logprob_decoder_output = torch.log(torch.softmax(decoder_output, dim=-1))
+
+        # check shape of the prediction
+        vocab_size = logprob_decoder_output.shape[-1]
+
+        curr_lines, current_log_probs = self.sample(decoder_output, y.reshape(bs, 1, -1), current_log_probs)
+        # -> (bs=1, 1 <= n_candidates <= beam_width, curr_len+1), (bs=1, n_candidates)
+
+        predictions = self.max_len - 1
+
+        for i in range(predictions - 1):
+            bs, n_candidates, curr_len = curr_lines.size()
+            src_bw = src.repeat((n_candidates, 1, 1)).transpose(0, 1).flatten(end_dim=1)
+            # -> (b_s * n_candidates, length)
+            next_logits = self.model(src_bw, curr_lines.reshape(-1, curr_len))[:, -1, :]
+            #   -> (bs * n_candidates, vocab_size)
+            curr_lines, current_log_probs = self.sample(next_logits.reshape(bs, n_candidates, -1), curr_lines,
+                                                        current_log_probs)
+            # -> (bs=1, 1 <= n_candidates <= beam_width, curr_len+1), (bs=1, n_candidates)
+            if (curr_lines.flatten(end_dim=1) == self.eos_token).sum(-1).bool().sum().item() == bs * curr_lines.shape[1]:
+                break
+        return curr_lines  # (bs=1, 1 <= n_candidates <= beam_width, len)
+
+
 
 if __name__ == '__main__':
     from tests.mock_model import MockCopySequence
