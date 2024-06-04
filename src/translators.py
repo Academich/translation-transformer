@@ -48,8 +48,12 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCycles:
         n_candidates, draft_len_plus_one, vocab_size = pred_logits.size()
         masked_logits = self.mask_with_num_logits_according_nucleus(pred_logits, num=0.)
         # -> (n_candidates, draft_len + 1, vocab_size)
-        masked_logits.scatter_(index=(n_accepted - 1).unsqueeze(-1).unsqueeze(-1).expand(n_candidates, 1, vocab_size),
-                               dim=1, value=0.)
+
+        tmp_range = torch.arange(draft_len_plus_one).type_as(curr_lines).unsqueeze(0)
+        #   -> (1, draft_len + 1)
+        mask_for_unaccepted_draft_tokens = tmp_range.repeat(n_candidates, 1) <= n_accepted.unsqueeze(-1)
+        #   -> (n_candidates, draft_len + 1)
+        masked_logits *= mask_for_unaccepted_draft_tokens.unsqueeze(-1)
         masked_logits[:, :-1, :].scatter_(index=chosen_drafts.unsqueeze(-1), dim=2, value=0.)
 
         candts_inds, token_postn, token_inds = torch.nonzero(masked_logits, as_tuple=True)  # (num)
@@ -58,19 +62,18 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCycles:
         drafts = chosen_drafts[candts_inds]  # (num, draft_len)
         tail = torch.full((num, 1), 0.).type_as(drafts)  # -> (num, 1)
         new_seqs = torch.cat((drafts, tail), dim=-1)  # (num, draft_len+1)
-
-        mask = torch.arange(draft_len_plus_one).to(curr_lines.device).unsqueeze(0) > token_postn.unsqueeze(-1)
-        #   -> (num, draft_len + 1)
-        predicted_log_probs = pred_logits.softmax(-1).log()[candts_inds]  # -> (num, draft_len + 1, vocab_size)
-
         new_seqs.scatter_(1, index=token_postn.unsqueeze(-1), src=token_inds.unsqueeze(-1))
         #   -> (num, draft_len + 1)
 
+        mask_for_tokens_after_the_sampled = tmp_range > token_postn.unsqueeze(-1)
+        #   -> (num, draft_len + 1)
+        predicted_log_probs = pred_logits.softmax(-1).log()[candts_inds]  # -> (num, draft_len + 1, vocab_size)
+
         draft_log_probs = torch.gather(predicted_log_probs, dim=2, index=new_seqs.unsqueeze(-1)).squeeze(-1)
         #    -> (num, draft_len + 1)
-        draft_log_probs.masked_fill_(mask, 0.)
+        draft_log_probs.masked_fill_(mask_for_tokens_after_the_sampled, 0.)
         new_lines_log_probs = curr_log_probs[candts_inds] + draft_log_probs.sum(-1)  # -> (num)
-        new_seqs.masked_fill_(mask, self.extra_pad)
+        new_seqs.masked_fill_(mask_for_tokens_after_the_sampled, self.extra_pad)
 
         new_candidates = torch.cat((previous_roots, new_seqs), dim=-1)  # -> (num, len_ + draft_len + 1)
         new_candidates = move_pads_to_the_left(new_candidates, self.extra_pad)
@@ -142,11 +145,13 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCycles:
                 # (n_candidates * n_drafts, curr_len + draft_len)
                 _, seq_len = draft_sequence.size()
                 pos_enc_offset = (draft_sequence == self.pad_token).int().sum(-1).reshape(-1, 1)
-                # pred_logits = self.model.decode_tgt(draft_sequence, memory_i.repeat(n_candidates, 1, 1),
-                #                                     memory_pad_mask=memory_pad_mask_i.repeat(n_candidates, 1),
-                #                                     pos_enc_offset=pos_enc_offset)
+                # For production, we use this model which supports positional encoding offset
                 pred_logits = self.model.decode_tgt(draft_sequence, memory_i.repeat(n_candidates, 1, 1),
-                                                    memory_pad_mask=memory_pad_mask_i.repeat(n_candidates, 1))
+                                                    memory_pad_mask=memory_pad_mask_i.repeat(n_candidates, 1),
+                                                    pos_enc_offset=pos_enc_offset)
+                # This one we use only for debugging:
+                # pred_logits = self.model.decode_tgt(draft_sequence, memory_i.repeat(n_candidates, 1, 1),
+                #                                     memory_pad_mask=memory_pad_mask_i.repeat(n_candidates, 1))
                 #   -> (n_candidates * n_drafts, curr_len + draft_len, vocab_size)
                 vocab_size = pred_logits.shape[-1]
                 pred_logits = pred_logits[:, -(draft_len + 1):, :]
@@ -201,6 +206,8 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCycles:
                     _, tokens_num = new_finished_candidates.size()
                     pad_tail = torch.full((num_new_finished, self.max_len - tokens_num),
                                           self.pad_token).type_as(src)
+                    # answers' pads will be on the left side of the row
+                    # and it's possible to have one pad on the right side
                     new_finished_candidates = torch.cat((pad_tail, new_finished_candidates), dim=1)
                     #   -> (num_new_finished, max_len)
                     new_finished_log_probs_t = new_log_probs[finished_bool_ids]
