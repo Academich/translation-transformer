@@ -233,8 +233,8 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
                     finished_candidates_log_probs_t = finished_candidates_log_probs_t[:self.n_best]
                     break
 
-                    generated_tokens = new_candidates[:self.n_best]
-                    log_probs_history = new_log_probs_history[:self.n_best]
+                generated_tokens = new_candidates[:self.n_best]
+                log_probs_history = new_log_probs_history[:self.n_best]
 
                 if generated_tokens.size()[0] == 0:
                     break
