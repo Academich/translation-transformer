@@ -1601,11 +1601,11 @@ class TranslationInferenceNucleusClassic:
                                                    descending=True)  # -> (n, vocab_size)
         cumulative_probs = torch.cumsum(sorted_logits.softmax(-1), dim=-1)  # -> (n, vocab_size)
 
+        cumulative_probs = torch.roll(cumulative_probs, 1, dims=-1)
         # Remove tokens with cumulative probability above the threshold
         keep_candidates_mask = cumulative_probs < self.nucleus  # -> (n, vocab_size)
         # To sample at least one token
         keep_candidates_mask[:, 0] = True
-        # keep_candidates_mask[:, 1] = True
         # To avoid sampling more than beam_size indexes
         keep_candidates_mask[:, 2 * self.beam_size:] = False
 
