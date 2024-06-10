@@ -29,18 +29,23 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
         self.max_num_positions_for_sampling = 5
         self.log_prob_pad = 1
         self.log_prob_extra_pad = 2
+        self.max_drafts_num = 100
 
     def __str__(self):
-        return f"NucleusSpeculativeUnbatched decoding (max_len={self.max_len}, nucleus={self.nucleus}, temperature={self.temperature})"
+        return f"NucleusSpeculativeUnbatched decoding (max_len={self.max_len}, nucleus={self.nucleus})"
 
     def sample(self, curr_lines, curr_log_probs_history, pred_logits, n_accepted, chosen_drafts):
-        # curr_lines: (n_candidates, len_),
-        # curr_log_probs_history: (n_candidates, len_),
-        # pred_logits: (n_candidates, draft_len + 1, vocab_size),
-        # n_accepted: (n_candidates),
-        # chosen_drafts: (n_candidates, draft_len)
-        #   ->  new_lines: (num_lines, len),
-        #       new_log_probs_history: (num_lines, len)
+        """
+        :param curr_lines: tensor (n_candidates, len_),
+        :param curr_log_probs_history: tensor (n_candidates, len_),
+        :param pred_logits: tensor (n_candidates, draft_len + 1, vocab_size),
+        :param n_accepted: tensor (n_candidates),
+        :param chosen_drafts: tensor (n_candidates, draft_len)
+        :return:
+          ->  new_lines: tensor (num_lines, len),
+              new_log_probs_history: tensor (num_lines, len)
+        """
+
         n_candidates, draft_len_plus_one, vocab_size = pred_logits.size()
         masked_logits = self.mask_with_num_logits_according_nucleus(pred_logits, num=0.)
         # -> (n_candidates, draft_len + 1, vocab_size)
@@ -144,7 +149,7 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
             src_unbatched_i_pads = (src_unbatched_i == self.pad_token).int().sum(-1)
             n_tokens_without_pads = src_unbatched_i.size(1) - src_unbatched_i_pads
             src_unbatched_i_unpadded = src_unbatched_i[:, :n_tokens_without_pads]
-            drafts = src_unbatched_i_unpadded.unfold(-1, self.n_speculative_tokens, 1).squeeze(0)[:100, :]
+            drafts = src_unbatched_i_unpadded.unfold(-1, self.n_speculative_tokens, 1).squeeze(0)[:self.max_drafts_num, :]
             # -> (n_drafts, draft_len)
             n_drafts, draft_len = drafts.size()
             iters = 0
@@ -157,7 +162,7 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
             finished_candidates_t = None
 
             log_probs_history = torch.full((1, 1), 0.).type_as(src).float()
-            while generated_tokens.size(1) < self.max_len:
+            while (generated_tokens.size(1) + self.n_speculative_tokens + 1) < self.max_len and iters < self.max_len:
                 iters += 1
                 n_candidates, curr_len = generated_tokens.size()
                 draft_tokens = drafts.repeat(n_candidates, 1)  # -> (n_candidates * n_drafts, draft_len)
@@ -172,10 +177,10 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
                 pred_logits = self.model.decode_tgt(draft_sequence, memory_i.repeat(n_candidates, 1, 1),
                                                     memory_pad_mask=memory_pad_mask_i.repeat(n_candidates, 1),
                                                     pos_enc_offset=pos_enc_offset)
-                # # This one we use only for debugging:
+                # # # This one we use only for debugging:
                 # pred_logits = self.model.decode_tgt(draft_sequence, memory_i.repeat(n_candidates, 1, 1),
                 #                                     memory_pad_mask=memory_pad_mask_i.repeat(n_candidates, 1))
-                #   -> (n_candidates * n_drafts, curr_len + draft_len, vocab_size)
+                #  -> (n_candidates * n_drafts, curr_len + draft_len, vocab_size)
                 vocab_size = pred_logits.shape[-1]
                 pred_logits = pred_logits[:, -(draft_len + 1):, :]
                 #   -> (n_candidates * n_drafts, draft_len + 1, vocab_size)
@@ -219,49 +224,77 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
 
                 new_candidates, new_log_probs_history = self.sort(new_candidates, new_log_probs_history,
                                                                   descending=True)
+                if finished_candidates_t is None:
+                    new_candidates = new_candidates[:self.n_best]
+                    new_log_probs_history = new_log_probs_history[:self.n_best]
+                else:
+                    new_candidates = new_candidates[:(self.n_best - finished_candidates_t.shape[0])]
+                    new_log_probs_history = new_log_probs_history[:(self.n_best - finished_candidates_t.shape[0])]
 
                 finished_bool_ids = (new_candidates == self.eos_token).sum(-1).bool()
                 #   -> (num_samples * n_candidates)
 
                 num_new_finished = finished_bool_ids.sum().item()
 
-                if num_new_finished == new_candidates.size()[0]:
-                    finished_candidates_t = new_candidates
-                    finished_candidates_log_probs_t = new_log_probs_history[:, -1]
+                if num_new_finished > 0:
+                    new_finished_candidates = cat_left_useless_pads(new_candidates[finished_bool_ids], self.pad_token)
+                    _, tokens_num = new_finished_candidates.size()
 
-                    finished_candidates_t = finished_candidates_t[:self.n_best]
-                    finished_candidates_log_probs_t = finished_candidates_log_probs_t[:self.n_best]
-                    break
+                    pad_tail = torch.full((num_new_finished, self.max_len - tokens_num),
+                                          self.pad_token).type_as(src)
+                    # answers' pads will be on the left side of the row
+                    new_finished_candidates = torch.cat((pad_tail, new_finished_candidates), dim=1)
+                    #   -> (num_new_finished, max_len)
+                    new_finished_log_probs_t = new_log_probs_history[finished_bool_ids][:,-1]
+                    #   -> (num_new_finished)
 
-                generated_tokens = new_candidates[:self.n_best]
-                log_probs_history = new_log_probs_history[:self.n_best]
+                    if finished_candidates_t is None:
+                        finished_candidates_t = new_finished_candidates
 
-                if generated_tokens.size()[0] == 0:
-                    break
+                        finished_candidates_log_probs_t = new_finished_log_probs_t
+                    else:
+                        finished_candidates_t = torch.cat((finished_candidates_t, new_finished_candidates), dim=0)
+
+                        finished_candidates_log_probs_t = torch.cat((finished_candidates_log_probs_t,
+                                                                     new_finished_log_probs_t), dim=0)
+
+                    if num_new_finished == new_candidates.shape[0] or (finished_candidates_t.shape[0] >= self.n_best and \
+                        new_log_probs_history[~finished_bool_ids][:, -1].max().item() < finished_candidates_log_probs_t.min().item()):
+                        break
+
+                generated_tokens = cat_left_useless_pads(new_candidates[~finished_bool_ids], self.pad_token)
+                log_probs_history = cat_left_useless_pads(new_log_probs_history[~finished_bool_ids], self.log_prob_pad)
 
             if finished_candidates_t is None:
+                print("there is no finished candidates for the src:", )
                 result.append(generated_tokens)
             else:
+                finished_candidates_t, finished_candidates_log_probs_t = \
+                    sort(finished_candidates_t, finished_candidates_log_probs_t,
+                         descending=True)
+                finished_candidates_t = finished_candidates_t[:self.n_best]
+                finished_candidates_log_probs_t = finished_candidates_log_probs_t[:self.n_best]
                 result.append(finished_candidates_t)  # (n, max_len)
             return result
 
-    def sort(self, candidates, candidates_log_probs_history, equal_length_mode=False, descending=True):
+    def sort(self, candidates, candidates_log_probs_history, descending=True):
         non_pad_tokens_num = (candidates != self.pad_token).sum(-1)
-        # -> (candts_num)
+        # -> (candidates_num)
         non_padded_log_progs_num = (candidates_log_probs_history <= 0.).sum(-1)
-        # -> (candts_num)
+        # -> (candidates_num)
         candidates_num, max_len = candidates.size()
         assert (non_padded_log_progs_num == non_pad_tokens_num).sum().item() == candidates_num
-        if equal_length_mode:
-            # TODO this branch is in progress
-            min_len = non_pad_tokens_num.min().item()
-            inds = min_len - non_pad_tokens_num - 1
-            candidates_log_probs = torch.gather(candidates_log_probs_history, dim=1, index=(max_len + inds).unsqueeze(-1)).squeeze(1)
-        else:
-            candidates_log_probs = candidates_log_probs_history[:, -1]
+        candidates_log_probs = candidates_log_probs_history[:, -1]
 
         sorted_log_probs, sorted_inds = candidates_log_probs.sort(descending=descending)
         return candidates[sorted_inds], candidates_log_probs_history[sorted_inds]
+
+def cat_left_useless_pads(tensor_t, pad_id):
+    # tensor_t is supposed to have pad ids only at the left
+    rows_num, _ = tensor_t.size()
+    # number of left columns filled with the pad id
+    padded_columns_num = ((tensor_t == pad_id).sum(0) == rows_num).sum()
+    return tensor_t[:, padded_columns_num:]
 
 # Beam size: K
 # Batch size: B
