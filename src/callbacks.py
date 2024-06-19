@@ -52,8 +52,7 @@ class PredictionWriter(BasePredictionWriter):
         tkz = pl_module.tgt_tokenizer
         with open(self.output_path, "a") as f:
             tgt = batch["tgt_tokens"].cpu().numpy()
-            pred = prediction.cpu().numpy()
             for i, t in enumerate(tgt):
                 t_string = tkz.decode(t)
-                p_options = tkz.decode_batch(pred[i])
+                p_options = tkz.decode_batch(prediction[i].cpu().numpy())
                 print(",".join([t_string] + p_options), file=f)
