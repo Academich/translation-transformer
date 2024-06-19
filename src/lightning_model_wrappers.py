@@ -10,9 +10,8 @@ from pytorch_lightning import LightningModule
 from pytorch_lightning.utilities.types import STEP_OUTPUT
 
 from tokenization import GenericTokenizer
-from translators import TranslationInferenceBeamSearch, TranslationInferenceGreedy, \
-    TranslationInferenceGreedySpeculativeUnbatched, \
-    TranslationInferenceNucleusSpeculativeUnbatched
+from translators import TranslationInferenceGreedy, TranslationInferenceBeamSearch, TranslationInferenceNucleusClassic, \
+    TranslationInferenceGreedySpeculative, TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory
 from utils import NoamLRSchedule, ConstantLRSchedule, calc_token_acc, calc_sequence_acc
 
 
@@ -68,7 +67,13 @@ class TranslationModel(LightningModule):
         raise NotImplementedError
 
     def _create_generator(self):
-        if self.hparams.generation == "beam_search":
+        if self.hparams.generation == "greedy":
+            self.generator = TranslationInferenceGreedy(self.model,
+                                                        max_len=self.hparams.max_len,
+                                                        pad_token=self.tgt_pad_token_i,
+                                                        bos_token=self.tgt_bos_token_i,
+                                                        eos_token=self.tgt_eos_token_i)
+        elif self.hparams.generation == "beam_search":
             self.generator = TranslationInferenceBeamSearch(self.model,
                                                             beam_size=self.hparams.beam_size,
                                                             n_best=self.hparams.n_best,
@@ -76,16 +81,18 @@ class TranslationModel(LightningModule):
                                                             pad_token=self.tgt_pad_token_i,
                                                             bos_token=self.tgt_bos_token_i,
                                                             eos_token=self.tgt_eos_token_i)
-        elif self.hparams.generation == "greedy":
-            self.generator = TranslationInferenceGreedy(self.model,
-                                                        max_len=self.hparams.max_len,
-                                                        pad_token=self.tgt_pad_token_i,
-                                                        bos_token=self.tgt_bos_token_i,
-                                                        eos_token=self.tgt_eos_token_i)
+        elif self.hparams.generation == "nucleus":
+            self.generator = TranslationInferenceNucleusClassic(self.model,
+                                                                beam_size=self.hparams.beam_size,
+                                                                n_best=self.hparams.beam_size,
+                                                                max_len=self.hparams.max_len,
+                                                                pad_token=self.tgt_pad_token_i,
+                                                                bos_token=self.tgt_bos_token_i,
+                                                                eos_token=self.tgt_eos_token_i)
 
         elif self.hparams.generation == "greedy_speculative":
             assert self.hparams.n_speculative_tokens > 0, "Number of speculative tokens must be a positive integer."
-            self.generator = TranslationInferenceGreedySpeculativeUnbatched(
+            self.generator = TranslationInferenceGreedySpeculative(
                 self.model,
                 max_len=self.hparams.max_len,
                 n_speculative_tokens=self.hparams.n_speculative_tokens,
@@ -94,12 +101,11 @@ class TranslationModel(LightningModule):
                 eos_token=self.tgt_eos_token_i
             )
         elif self.hparams.generation == "nucleus_speculative":
-            self.generator = TranslationInferenceNucleusSpeculativeUnbatched(
+            self.generator = TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory(
                 self.model,
                 max_len=self.hparams.max_len,
                 n_best=self.hparams.n_best,
                 n_speculative_tokens=self.hparams.n_speculative_tokens,
-                temperature=self.hparams.temperature,
                 nucleus=self.hparams.nucleus,
                 pad_token=self.tgt_pad_token_i,
                 bos_token=self.tgt_bos_token_i,
@@ -107,7 +113,7 @@ class TranslationModel(LightningModule):
             )
 
         else:
-            options = ", ".join(["beam_search", "greedy", "greedy_speculative"])
+            options = ", ".join(["beam_search", "greedy", "nucleus", "greedy_speculative", "nucleus_speculative"])
             raise ValueError(
                 f'Unknown generation option {self.hparams.generation}. Options are {options}.')
 
