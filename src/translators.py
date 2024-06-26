@@ -10,7 +10,7 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
                  pad_token: int,
                  bos_token: int,
                  eos_token: int,
-                 n_best: int = 5,
+                 n_best: int,
                  nucleus: float = 0.995
                  ) -> None:
         self.model = model
@@ -23,7 +23,7 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
         self.nucleus = nucleus
         self.n_best = n_best
         self.extra_pad = -1
-        self.max_num_positions_for_sampling = 5
+        self.max_num_positions_for_sampling = 2 * n_best
         self.log_prob_pad = 1
         self.log_prob_extra_pad = 2
         self.max_drafts_num = 100
@@ -44,7 +44,9 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
         """
 
         n_candidates, draft_len_plus_one, vocab_size = pred_logits.size()
-        masked_logits = self.mask_with_num_logits_according_nucleus(pred_logits, num=0.)
+        masked_logits = mask_with_num_logits_according_nucleus(pred_logits, nucleus=self.nucleus,
+                                                               max_num_positions_for_sampling=self.max_num_positions_for_sampling,
+                                                               num=0.)
         # -> (n_candidates, draft_len + 1, vocab_size)
 
         tmp_range = torch.arange(draft_len_plus_one).type_as(curr_lines).unsqueeze(0)
@@ -102,32 +104,10 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
         new_candidates.masked_fill_(new_candidates == self.extra_pad, self.pad_token)  # all pads will be at the left
         log_prob_history.masked_fill_(log_prob_history == self.log_prob_extra_pad, self.log_prob_pad)
 
-        new_candidates = new_candidates[:, ((new_candidates == self.pad_token).sum(0) == num).sum():]
-        log_prob_history = log_prob_history[:, ((log_prob_history == self.log_prob_pad).sum(0) == num).sum():]
+        new_candidates = cat_left_useless_pads(new_candidates, self.pad_token)
+        log_prob_history = cat_left_useless_pads(log_prob_history, self.log_prob_pad)
 
         return new_candidates, log_prob_history
-
-    def mask_with_num_logits_according_nucleus(self, pred_logits, num=0.):
-        n, curr_len, vocab_size = pred_logits.size()  # (n_candidates, draft_len + 1, vocab_size)
-        pred_logits = pred_logits.reshape(n * curr_len, vocab_size)  # -> (n * curr_len, vocab_size)
-
-        sorted_logits, sorted_indices = torch.sort(pred_logits,
-                                                   descending=True)  # -> (n * curr_len, vocab_size)
-        cumulative_probs = torch.cumsum(sorted_logits.softmax(-1), dim=-1)  # -> (n * curr_len, vocab_size)
-
-        # Remove tokens with cumulative probability above the threshold
-        cumulative_probs = torch.roll(cumulative_probs, 1, dims=-1)
-        cumulative_probs[:, 0] = 0
-        keep_candidates_mask = cumulative_probs < self.nucleus  # -> (n * curr_len, vocab_size)
-
-        keep_candidates_mask[:, self.max_num_positions_for_sampling:] = False
-        # no more than self.max_num_positions_for_sampling
-
-        sorted_logits.masked_fill_(~keep_candidates_mask, float(num))
-
-        masked_logits_according_nucleus = torch.gather(sorted_logits, 1, sorted_indices.argsort(1))
-        # -> (n * curr_len, vocab_size)
-        return masked_logits_according_nucleus.reshape(n, curr_len, vocab_size)
 
     def generate(self, src: 'torch.LongTensor') -> list['torch.LongTensor']:
         b_size, src_len = src.size()
@@ -181,7 +161,9 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
                 vocab_size = pred_logits.shape[-1]
                 pred_logits = pred_logits[:, -(draft_len + 1):, :]
                 #   -> (n_candidates * n_drafts, draft_len + 1, vocab_size)
-                masked_probs = self.mask_with_num_logits_according_nucleus(pred_logits, num="-inf").softmax(-1)
+                masked_probs = mask_with_num_logits_according_nucleus(pred_logits, nucleus=0.9975,
+                                                                      max_num_positions_for_sampling=5,
+                                                                      num="-inf").softmax(-1)
                 #   -> (n_candidates * n_drafts, draft_len + 1, vocab_size)
                 masked_probs = masked_probs.reshape(n_candidates, n_drafts, draft_len + 1, vocab_size)
                 draft_tokens = draft_tokens.reshape(n_candidates, n_drafts, draft_len)
@@ -231,7 +213,7 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
                         #   -> (min(num_new_finished, n_best))
 
                     finished_bool_ids = finished_bool_ids[:self.n_best]
-                    if finished_bool_ids.sum().item()  == self.n_best:
+                    if finished_bool_ids.sum().item() == self.n_best:
                         break
                     generated_tokens = cat_left_useless_pads(new_candidates[:self.n_best][~finished_bool_ids],
                                                              self.pad_token)
@@ -259,7 +241,8 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
                         finished_candidates_t = torch.cat((new_finished_candidates,
                                                            finished_candidates_t[inds_of_old_finished]), dim=0)
                         finished_candidates_log_probs_t = torch.cat((new_log_probs[inds_of_new_finished],
-                                                                     finished_candidates_log_probs_t[inds_of_old_finished]),
+                                                                     finished_candidates_log_probs_t[
+                                                                         inds_of_old_finished]),
                                                                     dim=0)
                     elif num_of_old_finished == 0 and num_of_new_finished > 0:
                         inds_of_new_finished = inds_of_finished[inds_of_finished < num]
@@ -273,17 +256,17 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
                     if next_circle_inds.shape[0] == 0:
                         break
                     generated_tokens = cat_left_useless_pads(new_candidates[next_circle_inds], self.pad_token)
-                    log_probs_history = cat_left_useless_pads(new_log_probs_history[next_circle_inds], self.log_prob_pad)
+                    log_probs_history = cat_left_useless_pads(new_log_probs_history[next_circle_inds],
+                                                              self.log_prob_pad)
 
-                best_current_log_prob =  log_probs_history[:,-1].max().item()
+                best_current_log_prob = log_probs_history[:, -1].max().item()
                 if finished_candidates_t is not None and \
                         (finished_candidates_t.shape[0] >= self.n_best and \
                          best_current_log_prob < finished_candidates_log_probs_t.min().item()):
                     break
 
-
             if finished_candidates_t is None:
-                print("there is no finished candidates for the src:", )
+                print("there is no finished candidates for the src")
                 result.append(generated_tokens)
             else:
                 finished_candidates_t, finished_candidates_log_probs_t = \
@@ -313,6 +296,31 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
 
         sorted_log_probs, sorted_inds = candidates_log_probs.sort(descending=descending)
         return candidates[sorted_inds], candidates_log_probs_history[sorted_inds]
+
+
+def mask_with_num_logits_according_nucleus(pred_logits, nucleus, max_num_positions_for_sampling, num=0.):
+    n, curr_len, vocab_size = pred_logits.size()  # (n_candidates, draft_len + 1, vocab_size)
+    pred_logits = pred_logits.reshape(n * curr_len, vocab_size)  # -> (n * curr_len, vocab_size)
+
+    sorted_logits, sorted_indices = torch.sort(pred_logits,
+                                               descending=True)  # -> (n * curr_len, vocab_size)
+    cumulative_probs = torch.cumsum(sorted_logits.softmax(-1), dim=-1)  # -> (n * curr_len, vocab_size)
+
+    # Remove tokens with cumulative probability above the threshold
+    cumulative_probs = torch.roll(cumulative_probs, 1, dims=-1)
+    cumulative_probs[:, 0] = 0
+    keep_candidates_mask = cumulative_probs < nucleus  # -> (n * curr_len, vocab_size)
+
+    keep_candidates_mask[:, max_num_positions_for_sampling:] = False
+    # no more than self.max_num_positions_for_sampling
+
+    sorted_logits.masked_fill_(~keep_candidates_mask, float(num))
+
+    masked_logits_according_nucleus = torch.gather(sorted_logits, 1, sorted_indices.argsort(1))
+    # -> (n * curr_len, vocab_size)
+    return masked_logits_according_nucleus.reshape(n, curr_len, vocab_size)
+
+
 
 def cat_left_useless_pads(tensor_t, pad_id):
     # tensor_t is supposed to have pad ids only at the left
