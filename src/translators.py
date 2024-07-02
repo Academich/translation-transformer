@@ -23,7 +23,7 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
         self.nucleus = nucleus
         self.n_best = n_best
         self.extra_pad = -1
-        self.max_num_positions_for_sampling = 2 * n_best
+        self.max_num_positions_for_sampling = 1 * n_best
         self.log_prob_pad = 1
         self.log_prob_extra_pad = 2
         self.max_drafts_num = 100
@@ -54,6 +54,10 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
         mask_for_unaccepted_draft_tokens = tmp_range.repeat(n_candidates, 1) <= n_accepted.unsqueeze(-1)
         #   -> (n_candidates, draft_len + 1)
         masked_logits *= mask_for_unaccepted_draft_tokens.unsqueeze(-1)
+        draft_len = draft_len_plus_one - 1
+        not_fully_accepted_inds_bool = n_accepted != draft_len
+        if not_fully_accepted_inds_bool.sum().item() != 0:
+            chosen_drafts[not_fully_accepted_inds_bool] = chosen_drafts[not_fully_accepted_inds_bool].scatter_(index=n_accepted[not_fully_accepted_inds_bool].unsqueeze(-1), dim=1, value=self.pad_token)
         masked_logits[:, :-1, :].scatter_(index=chosen_drafts.unsqueeze(-1), dim=2, value=0.)
 
         candts_inds, token_postn, token_inds = torch.nonzero(masked_logits, as_tuple=True)  # (num)
@@ -308,7 +312,7 @@ def mask_with_num_logits_according_nucleus(pred_logits, nucleus, max_num_positio
 
     # Remove tokens with cumulative probability above the threshold
     cumulative_probs = torch.roll(cumulative_probs, 1, dims=-1)
-    cumulative_probs[:, 0] = 0
+    cumulative_probs[:, 0] = nucleus - 1
     keep_candidates_mask = cumulative_probs < nucleus  # -> (n * curr_len, vocab_size)
 
     keep_candidates_mask[:, max_num_positions_for_sampling:] = False
