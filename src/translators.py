@@ -172,10 +172,8 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
                 masked_probs = masked_probs.reshape(n_candidates, n_drafts, draft_len + 1, vocab_size)
                 draft_tokens = draft_tokens.reshape(n_candidates, n_drafts, draft_len)
 
-                tmp = torch.gather(masked_probs[:, :, :-1, :], dim=-1, index=draft_tokens.unsqueeze(-1)).squeeze(-1)
-                #   -> (n_candidates, n_drafts, draft_len)
-                verification = tmp != 0.
-                # num = n_candidates
+                n_accepted_in_drafts = self.calculate_n_accepted_in_drafts(draft_tokens, masked_probs)
+                #   ->(num, n_drafts)
 
                 _range = verification.cumsum(-1)  # (num, n_drafts, draft_len)
                 accepted_in_drafts_bool = (torch.arange(1, verification.size(2) + 1).unsqueeze(0).unsqueeze(0).type_as(
@@ -280,6 +278,20 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
                 finished_candidates_log_probs_t = finished_candidates_log_probs_t[:self.n_best]
                 result.append(finished_candidates_t)  # (n, max_len)
             return result
+
+    def calculate_n_accepted_in_drafts(self, draft_tokens, masked_probs):
+        # masked_probs: tensor of size (n_candidates, n_drafts, draft_len + 1, vocab_size)
+        # draft_tokens: tensor of size (n_candidates, n_drafts, draft_len)
+        draft_tokens_probs = torch.gather(masked_probs[:, :, :-1, :], dim=-1, index=draft_tokens.unsqueeze(-1)).squeeze(-1)
+        #   -> (n_candidates, n_drafts, draft_len)
+        verification = draft_tokens_probs != 0.
+        # num = n_candidates
+
+        _range = verification.cumsum(-1)  # (num, n_drafts, draft_len)
+        accepted_in_drafts_bool = (torch.arange(1, verification.size(2) + 1).unsqueeze(0).unsqueeze(0).type_as(
+            _range) == _range)  # (num, n_drafts, draft_len)
+
+        return accepted_in_drafts_bool.sum(-1)  # (num, n_drafts, draft_len) -> (num, n_drafts)
 
     def make_left_pad_tail(self, t):
         candidates_num, curr_len = t.size()
