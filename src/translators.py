@@ -13,7 +13,7 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
                  n_best: int,
                  nucleus: float,
                  max_num_of_drafts: int = 23,
-                 draft_mode: bool = rue
+                 draft_mode: bool = True
                  ) -> None:
         self.model = model
         self.max_len = max_len
