@@ -177,7 +177,7 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
                 pred_logits = pred_logits[:, -(draft_len + 1):, :]
                 #   -> (n_candidates * n_drafts, draft_len + 1, vocab_size)
                 masked_probs = mask_with_num_logits_according_nucleus(pred_logits, nucleus=0.9975,
-                                                                      max_num_positions_for_sampling=5,
+                                                                      max_num_of_unmasked_positions=5,
                                                                       num="-inf").softmax(-1)
                 #   -> (n_candidates * n_drafts, draft_len + 1, vocab_size)
                 masked_probs = masked_probs.reshape(n_candidates, n_drafts, draft_len + 1, vocab_size)
@@ -186,11 +186,6 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
                 n_accepted_in_drafts = self.calculate_n_accepted_in_drafts(draft_tokens, masked_probs)
                 #   ->(num, n_drafts)
 
-                _range = verification.cumsum(-1)  # (num, n_drafts, draft_len)
-                accepted_in_drafts_bool = (torch.arange(1, verification.size(2) + 1).unsqueeze(0).unsqueeze(0).type_as(
-                    _range) == _range)  # (num, n_drafts, draft_len)
-
-                n_accepted_in_drafts = accepted_in_drafts_bool.sum(-1)  # (num, n_drafts, draft_len) -> (num, n_drafts)
                 n_accepted, draft_i = n_accepted_in_drafts.topk(1, dim=-1)
                 # (n_candidates, n_drafts) -> (n_candidates, 1)
                 chosen_drafts = torch.gather(draft_tokens, dim=1,
