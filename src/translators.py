@@ -11,53 +11,66 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
                  bos_token: int,
                  eos_token: int,
                  n_best: int,
-                 nucleus: float = 0.995
+                 nucleus: float,
+                 max_num_of_drafts: int = 23,
+                 draft_mode: bool = rue
                  ) -> None:
         self.model = model
         self.max_len = max_len
         self.pad_token = pad_token
         self.bos_token = bos_token
         self.eos_token = eos_token
-
-        self.n_speculative_tokens = n_speculative_tokens
-        self.nucleus = nucleus
+        self.draft_mode = draft_mode
+        if self.draft_mode:
+            self.draft_len = n_speculative_tokens
+            self.max_drafts_num = max_num_of_drafts
+        else:
+            self.draft_len = 1
+            self.max_drafts_num = 1
+        self.nucleus_for_sampling = nucleus
         self.n_best = n_best
         self.extra_pad = -1
         self.max_num_positions_for_sampling = 1 * n_best
         self.log_prob_pad = 1
         self.log_prob_extra_pad = 2
-        self.max_drafts_num = 100
 
     def __str__(self):
         return f"NucleusSpeculativeUnbatched decoding (max_len={self.max_len}, nucleus={self.nucleus})"
 
-    def sample(self, curr_lines, curr_log_probs_history, pred_logits, n_accepted, chosen_drafts):
+    def sample(self, curr_lines, curr_log_probs_history, pred_logits, chosen_drafts, n_accepted=None):
         """
         :param curr_lines: tensor (n_candidates, len_),
         :param curr_log_probs_history: tensor (n_candidates, len_),
         :param pred_logits: tensor (n_candidates, draft_len + 1, vocab_size),
-        :param n_accepted: tensor (n_candidates),
         :param chosen_drafts: tensor (n_candidates, draft_len)
+        :param n_accepted: tensor (n_candidates) or None = None
         :return:
           ->  new_lines: tensor (num_lines, len),
               new_log_probs_history: tensor (num_lines, len)
         """
 
         n_candidates, draft_len_plus_one, vocab_size = pred_logits.size()
-        masked_logits = mask_with_num_logits_according_nucleus(pred_logits, nucleus=self.nucleus,
-                                                               max_num_positions_for_sampling=self.max_num_positions_for_sampling,
+        assert draft_len_plus_one - 1 == self.draft_len
+        masked_logits = mask_with_num_logits_according_nucleus(pred_logits, nucleus=self.nucleus_for_sampling,
+                                                               max_num_of_unmasked_positions=self.max_num_positions_for_sampling,
                                                                num=0.)
         # -> (n_candidates, draft_len + 1, vocab_size)
 
         tmp_range = torch.arange(draft_len_plus_one).type_as(curr_lines).unsqueeze(0)
         #   -> (1, draft_len + 1)
+        if n_accepted is None:
+            n_accepted = self.calculate_n_accepted_in_drafts(chosen_drafts.unsqueeze(1), masked_logits.unsqueeze(1)).squeeze(-1)
+        else:
+            not_fully_accepted_inds_bool = n_accepted != self.draft_len
+            if not_fully_accepted_inds_bool.sum().item() != 0:
+                chosen_drafts[not_fully_accepted_inds_bool] = \
+                    chosen_drafts[not_fully_accepted_inds_bool].scatter_(index=n_accepted[not_fully_accepted_inds_bool].unsqueeze(-1),
+                                                                         dim=1, value=self.pad_token)
         mask_for_unaccepted_draft_tokens = tmp_range.repeat(n_candidates, 1) <= n_accepted.unsqueeze(-1)
         #   -> (n_candidates, draft_len + 1)
         masked_logits *= mask_for_unaccepted_draft_tokens.unsqueeze(-1)
-        draft_len = draft_len_plus_one - 1
-        not_fully_accepted_inds_bool = n_accepted != draft_len
-        if not_fully_accepted_inds_bool.sum().item() != 0:
-            chosen_drafts[not_fully_accepted_inds_bool] = chosen_drafts[not_fully_accepted_inds_bool].scatter_(index=n_accepted[not_fully_accepted_inds_bool].unsqueeze(-1), dim=1, value=self.pad_token)
+
+
         masked_logits[:, :-1, :].scatter_(index=chosen_drafts.unsqueeze(-1), dim=2, value=0.)
 
         candts_inds, token_postn, token_inds = torch.nonzero(masked_logits, as_tuple=True)  # (num)
@@ -126,13 +139,11 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
         result = []
 
         for i in range(b_size):
-            src_unbatched_i = src_unbatched[i, :, 1:]
-            src_unbatched_i_pads = (src_unbatched_i == self.pad_token).int().sum(-1)
-            n_tokens_without_pads = src_unbatched_i.size(1) - src_unbatched_i_pads
-            src_unbatched_i_unpadded = src_unbatched_i[:, :n_tokens_without_pads]
-            drafts = src_unbatched_i_unpadded.unfold(-1, self.n_speculative_tokens, 1).squeeze(0)[:self.max_drafts_num, :]
-            # -> (n_drafts, draft_len)
+            drafts = self.build_drafts(src_unbatched[i], self.draft_mode)
+            # -> (self.max_drafts_num, self.draft_len)
+
             n_drafts, draft_len = drafts.size()
+            assert draft_len == self.draft_len
             iters = 0
 
             generated_tokens = torch.full((1, 1), self.bos_token).type_as(src).long()
@@ -143,7 +154,7 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
             finished_candidates_t = None
 
             log_probs_history = torch.full((1, 1), 0.).type_as(src).float()
-            while (generated_tokens.size(1) + self.n_speculative_tokens + 1) < self.max_len and iters < self.max_len:
+            while (generated_tokens.size(1) + self.draft_len + 1) < self.max_len and iters < self.max_len:
                 iters += 1
                 n_candidates, curr_len = generated_tokens.size()
                 draft_tokens = drafts.repeat(n_candidates, 1)  # -> (n_candidates * n_drafts, draft_len)
@@ -193,13 +204,13 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
                 #   -> (n_candidates, draft_len + 1, vocab_size)
 
                 new_candidates, new_log_probs_history = \
-                    self.sample(generated_tokens, log_probs_history, pred_logits, n_accepted.squeeze(-1),
-                                chosen_drafts)
+                    self.sample(generated_tokens, log_probs_history, pred_logits,
+                                chosen_drafts, n_accepted.squeeze(-1))
                 # generated_tokens: (n_candidates, curr_len),
                 # log_probs_history: (n_candidates, curr_len),
                 # pred_logits: (n_candidates, draft_len + 1, vocab_size),
-                # n_accepted: (n_candidates),
                 # chosen_drafts: (n_candidates, draft_len)
+                # n_accepted: (n_candidates) or None = None
                 #   ->  new_candidates: (num_lines, len),
                 #       new_log_probs_history: (num_lines, len)
 
@@ -313,8 +324,21 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
         sorted_log_probs, sorted_inds = candidates_log_probs.sort(descending=descending)
         return candidates[sorted_inds], candidates_log_probs_history[sorted_inds]
 
+    def build_drafts(self, src_unbatched: 'torch.LongTensor', draft_mode: bool):
+        if draft_mode:
+            src_unbatched_i = src_unbatched[:, 1:]
+            src_unbatched_i_pads = (src_unbatched_i == self.pad_token).int().sum(-1)
+            n_tokens_without_pads = src_unbatched_i.size(1) - src_unbatched_i_pads
+            src_unbatched_i_unpadded = src_unbatched_i[:, :n_tokens_without_pads]
+            drafts = src_unbatched_i_unpadded.unfold(-1, self.draft_len, 1).squeeze(0)[:self.max_drafts_num, :]
+            # -> (n_drafts, draft_len)
+        else:
+            drafts = src_unbatched[:, 0].unsqueeze(0).expand(self.max_drafts_num, 1)  # just [bos]
+            # -> (n_drafts, draft_len=1)
+        return drafts
 
-def mask_with_num_logits_according_nucleus(pred_logits, nucleus, max_num_positions_for_sampling, num=0.):
+
+def mask_with_num_logits_according_nucleus(pred_logits, nucleus, max_num_of_unmasked_positions, num=0.):
     n, curr_len, vocab_size = pred_logits.size()  # (n_candidates, draft_len + 1, vocab_size)
     pred_logits = pred_logits.reshape(n * curr_len, vocab_size)  # -> (n * curr_len, vocab_size)
 
@@ -327,8 +351,8 @@ def mask_with_num_logits_according_nucleus(pred_logits, nucleus, max_num_positio
     cumulative_probs[:, 0] = nucleus - 1
     keep_candidates_mask = cumulative_probs < nucleus  # -> (n * curr_len, vocab_size)
 
-    keep_candidates_mask[:, max_num_positions_for_sampling:] = False
-    # no more than self.max_num_positions_for_sampling
+    keep_candidates_mask[:, max_num_of_unmasked_positions:] = False
+    # no more than max_num_of_unmasked_positions
 
     sorted_logits.masked_fill_(~keep_candidates_mask, float(num))
 
