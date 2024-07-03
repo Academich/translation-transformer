@@ -221,7 +221,7 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
                         #   -> (min(num_new_finished, n_best))
 
                     finished_bool_ids = finished_bool_ids[:self.n_best]
-                    if finished_bool_ids.sum().item() == self.n_best:
+                    if finished_bool_ids.sum().item() == finished_bool_ids.shape[0]:
                         break
                     generated_tokens = cat_left_useless_pads(new_candidates[:self.n_best][~finished_bool_ids],
                                                              self.pad_token)
