@@ -11,8 +11,8 @@ from pytorch_lightning.utilities.types import STEP_OUTPUT
 
 from tokenization import GenericTokenizer
 from decoding import TranslationInferenceGreedy, TranslationInferenceBeamSearch
-from translators import TranslationInferenceNucleusClassic, \
-    TranslationInferenceGreedySpeculative, TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory
+from speculative_decoding import TranslationInferenceNucleusClassic, \
+    TranslationInferenceGreedySpeculative, TranslationInferenceBeamSearchSpeculativeUnbatched
 from utils import NoamLRSchedule, ConstantLRSchedule, calc_token_acc, calc_sequence_acc
 
 
@@ -102,7 +102,7 @@ class TranslationModel(LightningModule):
                 eos_token=self.tgt_eos_token_i
             )
         elif self.hparams.generation == "nucleus_speculative":
-            self.generator = TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory(
+            self.generator = TranslationInferenceBeamSearchSpeculativeUnbatched(
                 self.model,
                 max_len=self.hparams.max_len,
                 n_best=self.hparams.n_best,
