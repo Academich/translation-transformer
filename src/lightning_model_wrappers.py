@@ -10,7 +10,8 @@ from pytorch_lightning import LightningModule
 from pytorch_lightning.utilities.types import STEP_OUTPUT
 
 from tokenization import GenericTokenizer
-from translators import TranslationInferenceGreedy, TranslationInferenceBeamSearch, TranslationInferenceNucleusClassic, \
+from decoding import TranslationInferenceGreedy, TranslationInferenceBeamSearch
+from translators import TranslationInferenceNucleusClassic, \
     TranslationInferenceGreedySpeculative, TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory
 from utils import NoamLRSchedule, ConstantLRSchedule, calc_token_acc, calc_sequence_acc
 
