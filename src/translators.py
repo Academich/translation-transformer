@@ -1,7 +1,18 @@
 import torch
 
 
-class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
+def trim_left_pads(tensor_t, pad_id: int):
+    """
+    Remove columns from the left that contain only PAD tokens.
+    tensor_t is supposed to have PAD tokens only on the left
+    """
+    rows_num, _ = tensor_t.size()
+    # number of left columns filled with the pad id
+    padded_columns_num = ((tensor_t == pad_id).sum(0) == rows_num).sum()
+    return tensor_t[:, padded_columns_num:]
+
+
+class TranslationInferenceBeamSearchSpeculativeUnbatched:
 
     def __init__(self,
                  model,  # TranslationModel
@@ -121,8 +132,8 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
         new_candidates.masked_fill_(new_candidates == self.extra_pad, self.pad_token)  # all pads will be at the left
         log_prob_history.masked_fill_(log_prob_history == self.log_prob_extra_pad, self.log_prob_pad)
 
-        new_candidates = cat_left_useless_pads(new_candidates, self.pad_token)
-        log_prob_history = cat_left_useless_pads(log_prob_history, self.log_prob_pad)
+        new_candidates = trim_left_pads(new_candidates, self.pad_token)
+        log_prob_history = trim_left_pads(log_prob_history, self.log_prob_pad)
 
         return new_candidates, log_prob_history
 
@@ -223,10 +234,10 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
                     finished_bool_ids = finished_bool_ids[:self.n_best]
                     if finished_bool_ids.sum().item() == finished_bool_ids.shape[0]:
                         break
-                    generated_tokens = cat_left_useless_pads(new_candidates[:self.n_best][~finished_bool_ids],
-                                                             self.pad_token)
-                    log_probs_history = cat_left_useless_pads(new_log_probs_history[:self.n_best][~finished_bool_ids],
-                                                              self.log_prob_pad)
+                    generated_tokens = trim_left_pads(new_candidates[:self.n_best][~finished_bool_ids],
+                                                      self.pad_token)
+                    log_probs_history = trim_left_pads(new_log_probs_history[:self.n_best][~finished_bool_ids],
+                                                       self.log_prob_pad)
                 else:
                     finished_bool_ids = torch.cat(((new_candidates == self.eos_token).sum(-1).bool(),
                                                    (finished_candidates_t == self.eos_token).sum(-1).bool()), dim=0)
@@ -263,9 +274,9 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
                     next_circle_inds = inds[:self.n_best][~finished_bool_ids]
                     if next_circle_inds.shape[0] == 0:
                         break
-                    generated_tokens = cat_left_useless_pads(new_candidates[next_circle_inds], self.pad_token)
-                    log_probs_history = cat_left_useless_pads(new_log_probs_history[next_circle_inds],
-                                                              self.log_prob_pad)
+                    generated_tokens = trim_left_pads(new_candidates[next_circle_inds], self.pad_token)
+                    log_probs_history = trim_left_pads(new_log_probs_history[next_circle_inds],
+                                                       self.log_prob_pad)
 
                 best_current_log_prob = log_probs_history[:, -1].max().item()
                 if finished_candidates_t is not None and \
@@ -302,7 +313,7 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
     def make_left_pad_tail(self, t):
         candidates_num, curr_len = t.size()
         if curr_len > self.max_len:
-            t = cat_left_useless_pads(t, self.pad_token)
+            t = trim_left_pads(t, self.pad_token)
         assert t.shape[1] <= self.max_len
         pad_tail = torch.full((t.shape[0], self.max_len - t.shape[1]), self.pad_token).type_as(t)
         return torch.cat((pad_tail, t), dim=1)
