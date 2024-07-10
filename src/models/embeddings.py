@@ -59,7 +59,7 @@ class PositionalEncoding(nn.Module):
         """
         seq_len = x.size(1)
         shifts = torch.relu(
-            torch.arange(1, seq_len + 1) - offset).int()  # amounts to self.pe[1: seq_len + 1] if offset is 0
+            torch.arange(1, seq_len + 1).type_as(x) - offset).int()  # amounts to self.pe[1: seq_len + 1] if offset is 0
         pe = self.pe[shifts]
         return x + pe
 
