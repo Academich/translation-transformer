@@ -1,6 +1,28 @@
 import torch
 
 
+def move_pads_to_the_right(arr: torch.Tensor, pad_token: int = 0) -> torch.Tensor:
+    """
+    Moves pad tokens "pad_tokens" from the left side of the tensor to the right.
+    """
+    n_rows, n_cols = arr.size()
+    dim_indices = torch.arange(n_cols).type_as(arr).long().repeat(n_rows).reshape(n_rows, -1)
+    pad_count = (arr == pad_token).sum(1)
+    indices = (dim_indices + pad_count.unsqueeze(1)) % n_cols
+    return torch.gather(arr, dim=1, index=indices)
+
+
+def move_pads_to_the_left(arr: torch.Tensor, pad_token: int = 0) -> torch.Tensor:
+    """
+    Moves pad tokens "pad_tokens" from the right side of the tensor to the left.
+    """
+    n_rows, n_cols = arr.size()
+    dim_indices = torch.arange(n_cols).type_as(arr).long().repeat(n_rows).reshape(n_rows, -1)
+    eos_index = (arr == pad_token).sum(1)
+    indices = (dim_indices - eos_index.unsqueeze(1)) % n_cols
+    return torch.gather(arr, dim=1, index=indices)
+
+
 def trim_left_pads(tensor_t, pad_id: int):
     """
     Remove columns from the left that contain only PAD tokens.
@@ -372,13 +394,6 @@ def mask_with_num_logits_according_nucleus(pred_logits, nucleus, max_num_of_unma
 def sort(candidates, candidates_log_probs, descending=True):
     sorted_log_probs, sorted_inds = candidates_log_probs.sort(descending=descending)
     return candidates[sorted_inds], sorted_log_probs
-
-
-def move_pads_to_the_left(arr, pad_token=0):
-    dim_indices = torch.arange(arr.shape[1]).type_as(arr).long().repeat(arr.shape[0]).reshape(arr.shape[0], -1)
-    eos_index = (arr == pad_token).sum(1)
-    indices = (dim_indices - eos_index.unsqueeze(1)) % arr.shape[1]
-    return torch.gather(arr, dim=1, index=indices)
 
 
 class TranslationInferenceGreedySpeculative:
