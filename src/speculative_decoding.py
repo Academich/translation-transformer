@@ -398,8 +398,7 @@ def sort(candidates, candidates_log_probs, descending=True):
 
 class TranslationInferenceGreedySpeculative:
     """
-    Supposed to be faster than TranslationInferenceGreedySpeculativeUnbatched because it supports batching.
-    But isn't for some reason.
+    Speculative greedy decoding that supports input batch sizes larger than 1.
     """
 
     def __init__(self,
@@ -431,7 +430,7 @@ class TranslationInferenceGreedySpeculative:
         draft_tokens = src[:, 1:].unfold(-1, self.n_speculative_tokens, 1)
         n_drafts = draft_tokens.size(1)
         iters = 0
-        finished_predictions = torch.full((b_size, self.max_len), self.pad_token)
+        finished_predictions = torch.full((b_size, self.max_len), self.pad_token).type_as(src)
         batch_indices = torch.arange(b_size).type_as(src)
         while generated_tokens.size(1) < self.max_len:
             iters += 1
