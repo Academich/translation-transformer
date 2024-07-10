@@ -573,22 +573,6 @@ class TranslationInferenceGreedySpeculativeUnbatched:
         return pad_sequence(result, padding_value=self.pad_token, batch_first=True).unsqueeze(1)
 
 
-def move_pads_to_the_right(arr, pad_token=0):
-    n_rows, n_cols = arr.size()
-    dim_indices = torch.arange(n_cols).type_as(arr).long().repeat(n_rows).reshape(n_rows, -1)
-    pad_count = (arr == pad_token).sum(1)
-    indices = (dim_indices + pad_count.unsqueeze(1)) % n_cols
-    return torch.gather(arr, dim=1, index=indices)
-
-
-def move_pads_to_the_left(arr, pad_token=0):
-    n_rows, n_cols = arr.size()
-    dim_indices = torch.arange(n_cols).type_as(arr).long().repeat(n_rows).reshape(n_rows, -1)
-    eos_index = (arr == pad_token).sum(1)
-    indices = (dim_indices - eos_index.unsqueeze(1)) % n_cols
-    return torch.gather(arr, dim=1, index=indices)
-
-
 class TranslationInferenceNucleusSpeculativeUnbatched:
 
     def __init__(self,
