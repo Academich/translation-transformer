@@ -1,7 +1,40 @@
 import torch
 
 
-class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
+def move_pads_to_the_right(arr: torch.Tensor, pad_token: int = 0) -> torch.Tensor:
+    """
+    Moves pad tokens "pad_tokens" from the left side of the tensor to the right.
+    """
+    n_rows, n_cols = arr.size()
+    dim_indices = torch.arange(n_cols).type_as(arr).long().repeat(n_rows).reshape(n_rows, -1)
+    pad_count = (arr == pad_token).sum(1)
+    indices = (dim_indices + pad_count.unsqueeze(1)) % n_cols
+    return torch.gather(arr, dim=1, index=indices)
+
+
+def move_pads_to_the_left(arr: torch.Tensor, pad_token: int = 0) -> torch.Tensor:
+    """
+    Moves pad tokens "pad_tokens" from the right side of the tensor to the left.
+    """
+    n_rows, n_cols = arr.size()
+    dim_indices = torch.arange(n_cols).type_as(arr).long().repeat(n_rows).reshape(n_rows, -1)
+    eos_index = (arr == pad_token).sum(1)
+    indices = (dim_indices - eos_index.unsqueeze(1)) % n_cols
+    return torch.gather(arr, dim=1, index=indices)
+
+
+def trim_left_pads(tensor_t, pad_id: int):
+    """
+    Remove columns from the left that contain only PAD tokens.
+    tensor_t is supposed to have PAD tokens only on the left
+    """
+    rows_num, _ = tensor_t.size()
+    # number of left columns filled with the pad id
+    padded_columns_num = ((tensor_t == pad_id).sum(0) == rows_num).sum()
+    return tensor_t[:, padded_columns_num:]
+
+
+class TranslationInferenceBeamSearchSpeculativeUnbatched:
 
     def __init__(self,
                  model,  # TranslationModel
@@ -59,17 +92,18 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
         tmp_range = torch.arange(draft_len_plus_one).type_as(curr_lines).unsqueeze(0)
         #   -> (1, draft_len + 1)
         if n_accepted is None:
-            n_accepted = self.calculate_n_accepted_in_drafts(chosen_drafts.unsqueeze(1), masked_logits.unsqueeze(1)).squeeze(-1)
+            n_accepted = self.calculate_n_accepted_in_drafts(chosen_drafts.unsqueeze(1),
+                                                             masked_logits.unsqueeze(1)).squeeze(-1)
         else:
             not_fully_accepted_inds_bool = n_accepted != self.draft_len
             if not_fully_accepted_inds_bool.sum().item() != 0:
                 chosen_drafts[not_fully_accepted_inds_bool] = \
-                    chosen_drafts[not_fully_accepted_inds_bool].scatter_(index=n_accepted[not_fully_accepted_inds_bool].unsqueeze(-1),
-                                                                         dim=1, value=self.pad_token)
+                    chosen_drafts[not_fully_accepted_inds_bool].scatter_(
+                        index=n_accepted[not_fully_accepted_inds_bool].unsqueeze(-1),
+                        dim=1, value=self.pad_token)
         mask_for_unaccepted_draft_tokens = tmp_range.repeat(n_candidates, 1) <= n_accepted.unsqueeze(-1)
         #   -> (n_candidates, draft_len + 1)
         masked_logits *= mask_for_unaccepted_draft_tokens.unsqueeze(-1)
-
 
         masked_logits[:, :-1, :].scatter_(index=chosen_drafts.unsqueeze(-1), dim=2, value=0.)
 
@@ -121,8 +155,8 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
         new_candidates.masked_fill_(new_candidates == self.extra_pad, self.pad_token)  # all pads will be at the left
         log_prob_history.masked_fill_(log_prob_history == self.log_prob_extra_pad, self.log_prob_pad)
 
-        new_candidates = cat_left_useless_pads(new_candidates, self.pad_token)
-        log_prob_history = cat_left_useless_pads(log_prob_history, self.log_prob_pad)
+        new_candidates = trim_left_pads(new_candidates, self.pad_token)
+        log_prob_history = trim_left_pads(log_prob_history, self.log_prob_pad)
 
         return new_candidates, log_prob_history
 
@@ -223,10 +257,10 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
                     finished_bool_ids = finished_bool_ids[:self.n_best]
                     if finished_bool_ids.sum().item() == finished_bool_ids.shape[0]:
                         break
-                    generated_tokens = cat_left_useless_pads(new_candidates[:self.n_best][~finished_bool_ids],
-                                                             self.pad_token)
-                    log_probs_history = cat_left_useless_pads(new_log_probs_history[:self.n_best][~finished_bool_ids],
-                                                              self.log_prob_pad)
+                    generated_tokens = trim_left_pads(new_candidates[:self.n_best][~finished_bool_ids],
+                                                      self.pad_token)
+                    log_probs_history = trim_left_pads(new_log_probs_history[:self.n_best][~finished_bool_ids],
+                                                       self.log_prob_pad)
                 else:
                     finished_bool_ids = torch.cat(((new_candidates == self.eos_token).sum(-1).bool(),
                                                    (finished_candidates_t == self.eos_token).sum(-1).bool()), dim=0)
@@ -263,9 +297,9 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
                     next_circle_inds = inds[:self.n_best][~finished_bool_ids]
                     if next_circle_inds.shape[0] == 0:
                         break
-                    generated_tokens = cat_left_useless_pads(new_candidates[next_circle_inds], self.pad_token)
-                    log_probs_history = cat_left_useless_pads(new_log_probs_history[next_circle_inds],
-                                                              self.log_prob_pad)
+                    generated_tokens = trim_left_pads(new_candidates[next_circle_inds], self.pad_token)
+                    log_probs_history = trim_left_pads(new_log_probs_history[next_circle_inds],
+                                                       self.log_prob_pad)
 
                 best_current_log_prob = log_probs_history[:, -1].max().item()
                 if finished_candidates_t is not None and \
@@ -288,7 +322,8 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
     def calculate_n_accepted_in_drafts(self, draft_tokens, masked_probs):
         # masked_probs: tensor of size (n_candidates, n_drafts, draft_len + 1, vocab_size)
         # draft_tokens: tensor of size (n_candidates, n_drafts, draft_len)
-        draft_tokens_probs = torch.gather(masked_probs[:, :, :-1, :], dim=-1, index=draft_tokens.unsqueeze(-1)).squeeze(-1)
+        draft_tokens_probs = torch.gather(masked_probs[:, :, :-1, :], dim=-1, index=draft_tokens.unsqueeze(-1)).squeeze(
+            -1)
         #   -> (n_candidates, n_drafts, draft_len)
         verification = draft_tokens_probs != 0.
         # num = n_candidates
@@ -302,7 +337,7 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory:
     def make_left_pad_tail(self, t):
         candidates_num, curr_len = t.size()
         if curr_len > self.max_len:
-            t = cat_left_useless_pads(t, self.pad_token)
+            t = trim_left_pads(t, self.pad_token)
         assert t.shape[1] <= self.max_len
         pad_tail = torch.full((t.shape[0], self.max_len - t.shape[1]), self.pad_token).type_as(t)
         return torch.cat((pad_tail, t), dim=1)
@@ -356,156 +391,14 @@ def mask_with_num_logits_according_nucleus(pred_logits, nucleus, max_num_of_unma
     return masked_logits_according_nucleus.reshape(n, curr_len, vocab_size)
 
 
-
-def cat_left_useless_pads(tensor_t, pad_id):
-    # tensor_t is supposed to have pad ids only at the left
-    rows_num, _ = tensor_t.size()
-    # number of left columns filled with the pad id
-    padded_columns_num = ((tensor_t == pad_id).sum(0) == rows_num).sum()
-    return tensor_t[:, padded_columns_num:]
-
-# Beam size: K
-# Batch size: B
-# Current length: L
-
-
 def sort(candidates, candidates_log_probs, descending=True):
     sorted_log_probs, sorted_inds = candidates_log_probs.sort(descending=descending)
     return candidates[sorted_inds], sorted_log_probs
 
 
-def move_pads_to_the_left(arr, pad_token=0):
-    dim_indices = torch.arange(arr.shape[1]).type_as(arr).long().repeat(arr.shape[0]).reshape(arr.shape[0], -1)
-    eos_index = (arr == pad_token).sum(1)
-    indices = (dim_indices - eos_index.unsqueeze(1)) % arr.shape[1]
-    return torch.gather(arr, dim=1, index=indices)
-
-class TranslationInferenceGreedy:
-
-    def __init__(self,
-                 model,  # TranslationModel
-                 max_len: int,
-                 pad_token: int,
-                 bos_token: int,
-                 eos_token: int) -> None:
-        self.model = model
-        self.max_len = max_len
-        self.pad_token = pad_token
-        self.bos_token = bos_token
-        self.eos_token = eos_token
-
-    def __str__(self):
-        return f"Greedy decoding (max_len={self.max_len})"
-
-    def sample(self, pred_logits):
-        return torch.argmax(pred_logits, dim=2)[:, -1:]
-
-    def generate(self, src: 'torch.LongTensor') -> 'torch.LongTensor':
-        b_size = src.size()[0]
-        generated_tokens = torch.full((b_size, 1), self.pad_token)
-        generated_tokens[:, 0] = self.bos_token
-        generated_tokens = generated_tokens.type_as(src).long()
-
-        src_pad_mask = (src == self.model.src_pad_token_i).bool()
-        memory = self.model.encode_src(src, src_pad_mask)
-
-        for _ in range(self.max_len):
-            pred_logits = self.model.decode_tgt(generated_tokens, memory, memory_pad_mask=src_pad_mask)
-            pred_token = self.sample(pred_logits)
-            generated_tokens = torch.cat(
-                (generated_tokens,
-                 pred_token),
-                dim=1
-            )
-            if (torch.logical_or(pred_token == self.eos_token,
-                                 pred_token == self.pad_token)).sum().item() == b_size:
-                break
-        return torch.cat([i.unsqueeze(0) for i in generated_tokens.unsqueeze(1)], dim=0)
-
-
-
-class TranslationInferenceBeamSearch:
-
-    def __init__(self,
-                 model,  # TranslationModel
-                 beam_size: int,
-                 n_best: int,
-                 max_len: int,
-                 pad_token: int,
-                 bos_token: int,
-                 eos_token: int):
-        self.model = model
-        self.beam_size = beam_size
-        self.n_best = n_best
-        self.max_len = max_len
-        self.pad_token = pad_token
-        self.bos_token = bos_token
-        self.eos_token = eos_token
-
-        assert self.beam_size >= self.n_best
-        assert self.max_len > 1
-
-    def __str__(self):
-        return f"Beam search decoding (beam_size={self.beam_size}, n_best={self.n_best}, max_len={self.max_len})"
-
-    def generate(self, src: 'torch.LongTensor') -> 'torch.LongTensor':
-        bs, _ = src.size()
-
-        # Prepare first tokens for decoder (bs, max_len)
-        y = torch.tensor([self.bos_token]).repeat(bs, 1).long().type_as(src)  # (bs,1)
-
-        # Decode for one step using decoder
-        decoder_output = self.model(src, y)  # (bs, 1, dict_len)
-        logprob_decoder_output = torch.log(torch.softmax(decoder_output, dim=-1))
-
-        # check shape of the prediction
-        vocab_size = logprob_decoder_output.shape[-1]
-
-        probabilities, next_chars = torch.topk(logprob_decoder_output, self.beam_size,
-                                               dim=-1, sorted=True)  # (bs, 1, beam_width), (bs, 1, beam_width)
-        probabilities = probabilities.squeeze(1)  # (bs, beam_width)
-        y = y.unsqueeze(1).repeat((1, 1, self.beam_size)).reshape(-1, 1)
-        # (beam_width * bs, 1)
-
-        next_chars = next_chars.reshape(-1, 1)  # (bs *beam_width, 1)
-        y = torch.cat((y, next_chars), axis=-1)  # (beam_width * bs, 2)
-
-        src_bw = src.repeat((self.beam_size, 1, 1)).transpose(0, 1).flatten(end_dim=1)  # (b_w, examples, length)
-        # (examples, beam_width, length) # fin_X [[5,20],[5,20],[5,20],[2,31],[2,31],[2,31]]
-        # (b_w * examples, length)
-
-        predictions = self.max_len - 1
-
-        for i in range(predictions - 1):
-            next_probabilities = torch.log(torch.softmax(self.model(src_bw, y), dim=-1))[:, -1,
-                                 :]  # (bs*b_w, vocab_size)
-
-            next_probabilities = next_probabilities.reshape(
-                (-1, self.beam_size, next_probabilities.shape[-1]))  # (examples, b_w, vocab_size)
-
-            probabilities = probabilities.unsqueeze(-1) + next_probabilities
-            # (examples,b_w,1) + (examples,b_w,vocab_size) ->(examples,b_w,vocab_size)
-
-            probabilities = probabilities.flatten(start_dim=1)  # (examples,b_w * vocab_size)
-            probabilities, idx = probabilities.topk(k=self.beam_size, axis=-1,
-                                                    sorted=True)  # (examples,b_w), (examples,b_w)
-            next_chars = torch.remainder(idx, vocab_size).flatten().unsqueeze(-1)  # (examples * b_w,1)
-            best_candidates = (idx / vocab_size).long()  # (examples,b_w)
-            best_candidates += torch.arange(y.shape[0] // self.beam_size, device=src.device).unsqueeze(
-                -1) * self.beam_size  # (beam_width * bs, 1)
-            y = y[best_candidates].flatten(end_dim=-2)  # (beam_width * bs, 2+i)
-            y = torch.cat((y, next_chars), axis=1)  # (beam_width * bs, 2+i)
-            if (y == self.eos_token).sum(-1).bool().sum().item() == y.size()[0]:
-                break
-        _, curr_len = y.size()
-        y = y.reshape(bs, self.beam_size, curr_len)
-        return y  # , probabilities  # (examples,b_w, max_len), (examples,b_w)
-
-
 class TranslationInferenceGreedySpeculative:
     """
-    Supposed to be faster than TranslationInferenceGreedySpeculativeUnbatched because it supports batching.
-    But isn't for some reason.
+    Speculative greedy decoding that supports input batch sizes larger than 1.
     """
 
     def __init__(self,
@@ -537,7 +430,7 @@ class TranslationInferenceGreedySpeculative:
         draft_tokens = src[:, 1:].unfold(-1, self.n_speculative_tokens, 1)
         n_drafts = draft_tokens.size(1)
         iters = 0
-        finished_predictions = torch.full((b_size, self.max_len), self.pad_token)
+        finished_predictions = torch.full((b_size, self.max_len), self.pad_token).type_as(src)
         batch_indices = torch.arange(b_size).type_as(src)
         while generated_tokens.size(1) < self.max_len:
             iters += 1
@@ -587,8 +480,8 @@ class TranslationInferenceGreedySpeculative:
                 current_finished_tokens = current_finished_tokens.masked_fill(current_finished_tokens == -1,
                                                                               self.pad_token)
                 current_finished_tokens = current_finished_tokens[:, :-(
-                            (current_finished_tokens == self.pad_token).sum(dim=0) == current_finished_tokens.size(
-                        0)).sum()]
+                        (current_finished_tokens == self.pad_token).sum(dim=0) == current_finished_tokens.size(
+                    0)).sum()]
 
                 finished_predictions[batch_finished_indices, :current_finished_tokens.size(1)] = current_finished_tokens
 
@@ -608,9 +501,11 @@ class TranslationInferenceGreedySpeculative:
 
         return finished_predictions.unsqueeze(1)
 
+
 def num_speculative_tokens_to_accept(arr: torch.BoolTensor):
     _range = arr.cumsum(-1)
     return (torch.arange(1, arr.size(1) + 1).type_as(_range) == _range).sum(-1)
+
 
 class TranslationInferenceGreedySpeculativeUnbatched:
 
@@ -675,22 +570,6 @@ class TranslationInferenceGreedySpeculativeUnbatched:
                     break
             result.append(generated_tokens.squeeze(0))
         return pad_sequence(result, padding_value=self.pad_token, batch_first=True).unsqueeze(1)
-
-
-def move_pads_to_the_right(arr, pad_token=0):
-    n_rows, n_cols = arr.size()
-    dim_indices = torch.arange(n_cols).type_as(arr).long().repeat(n_rows).reshape(n_rows, -1)
-    pad_count = (arr == pad_token).sum(1)
-    indices = (dim_indices + pad_count.unsqueeze(1)) % n_cols
-    return torch.gather(arr, dim=1, index=indices)
-
-
-def move_pads_to_the_left(arr, pad_token=0):
-    n_rows, n_cols = arr.size()
-    dim_indices = torch.arange(n_cols).type_as(arr).long().repeat(n_rows).reshape(n_rows, -1)
-    eos_index = (arr == pad_token).sum(1)
-    indices = (dim_indices - eos_index.unsqueeze(1)) % n_cols
-    return torch.gather(arr, dim=1, index=indices)
 
 
 class TranslationInferenceNucleusSpeculativeUnbatched:
@@ -825,6 +704,7 @@ class TranslationInferenceNucleusSpeculativeUnbatched:
             result.append(pad_sequence(finished_candidates, padding_value=self.pad_token, batch_first=True))
         return result
 
+
 class TranslationInferenceNucleusSpeculativeUnbatchedNoCycles:
 
     def __init__(self,
@@ -872,7 +752,8 @@ class TranslationInferenceNucleusSpeculativeUnbatchedNoCycles:
         best_probs = best_candidates_logits.softmax(-1)
 
         sampled_tokens = torch.multinomial(best_probs, num_samples, True)  # -> (n * curr_len, num_samples)
-        line_log_probs = torch.gather(pred_logits.softmax(-1), dim=1, index=sampled_tokens).log()  # -> (n * curr_len, num_samples)
+        line_log_probs = torch.gather(pred_logits.softmax(-1), dim=1,
+                                      index=sampled_tokens).log()  # -> (n * curr_len, num_samples)
 
         sampled_tokens = sampled_tokens.reshape(n, curr_len, num_samples)  # ->(n, draft_len + 1, num_samples)
         line_log_probs = line_log_probs.reshape(n, curr_len, num_samples)  # ->(n, draft_len + 1, num_samples)

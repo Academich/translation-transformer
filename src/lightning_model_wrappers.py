@@ -10,8 +10,9 @@ from pytorch_lightning import LightningModule
 from pytorch_lightning.utilities.types import STEP_OUTPUT
 
 from tokenization import GenericTokenizer
-from translators import TranslationInferenceGreedy, TranslationInferenceBeamSearch, TranslationInferenceNucleusClassic, \
-    TranslationInferenceGreedySpeculative, TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory
+from decoding import TranslationInferenceGreedy, TranslationInferenceBeamSearch
+from speculative_decoding import TranslationInferenceNucleusClassic, \
+    TranslationInferenceGreedySpeculative, TranslationInferenceBeamSearchSpeculativeUnbatched
 from utils import NoamLRSchedule, ConstantLRSchedule, calc_token_acc, calc_sequence_acc
 
 
@@ -32,8 +33,10 @@ class TranslationModel(LightningModule):
                  max_len: int = 100,
                  n_speculative_tokens: int = 0,
                  nucleus: float = 0.995,
-                 temperature: float = 1,
-                 report_prediction_time: bool = False
+                 max_num_of_drafts: int = 23,
+                 draft_mode: bool = True,
+                 report_prediction_time: bool = False,
+                 report_prediction_file: str | None = None
                  ):
         super().__init__()
         self.save_hyperparameters(ignore=["src_tokenizer", "tgt_tokenizer"])
@@ -101,12 +104,14 @@ class TranslationModel(LightningModule):
                 eos_token=self.tgt_eos_token_i
             )
         elif self.hparams.generation == "nucleus_speculative":
-            self.generator = TranslationInferenceNucleusSpeculativeUnbatchedNoCyclesLogProbHistory(
+            self.generator = TranslationInferenceBeamSearchSpeculativeUnbatched(
                 self.model,
                 max_len=self.hparams.max_len,
                 n_best=self.hparams.n_best,
                 n_speculative_tokens=self.hparams.n_speculative_tokens,
                 nucleus=self.hparams.nucleus,
+                max_num_of_drafts=self.hparams.max_num_of_drafts,
+                draft_mode=self.hparams.draft_mode,
                 pad_token=self.tgt_pad_token_i,
                 bos_token=self.tgt_bos_token_i,
                 eos_token=self.tgt_eos_token_i
@@ -196,9 +201,14 @@ class TranslationModel(LightningModule):
 
     def on_predict_end(self) -> None:
         if self.report_prediction_time:
-            elapsed = str(datetime.timedelta(seconds=timer() - self.prediction_start_time))
-            print("Predict time elapsed:", elapsed)
+            elapsed = datetime.timedelta(seconds=timer() - self.prediction_start_time)
+            print(f"Predict time elapsed: {elapsed}; total seconds: {elapsed.total_seconds()}")
             print("Decoding:", self.generator)
+            if self.hparams.report_prediction_file is not None:
+                with open(self.hparams.report_prediction_file, "a") as f:
+                    print(f"Predict time elapsed: {elapsed}; total seconds: {elapsed.total_seconds()}", file=f)
+                    print("Decoding:", self.generator, file=f)
+                    print(file=f)
 
     def configure_optimizers(self):
         optimizer = optim.Adam(self.parameters(),
