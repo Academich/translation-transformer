@@ -33,7 +33,8 @@ class TranslationModel(LightningModule):
                  max_len: int = 100,
                  n_speculative_tokens: int = 0,
                  nucleus: float = 0.995,
-                 temperature: float = 1,
+                 max_num_of_drafts: int = 23,
+                 draft_mode: bool = True,
                  report_prediction_time: bool = False
                  ):
         super().__init__()
@@ -108,6 +109,8 @@ class TranslationModel(LightningModule):
                 n_best=self.hparams.n_best,
                 n_speculative_tokens=self.hparams.n_speculative_tokens,
                 nucleus=self.hparams.nucleus,
+                max_num_of_drafts=self.hparams.max_num_of_drafts,
+                draft_mode=self.hparams.draft_mode,
                 pad_token=self.tgt_pad_token_i,
                 bos_token=self.tgt_bos_token_i,
                 eos_token=self.tgt_eos_token_i
