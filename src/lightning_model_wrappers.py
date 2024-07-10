@@ -79,7 +79,6 @@ class TranslationModel(LightningModule):
         elif self.hparams.generation == "beam_search":
             self.generator = TranslationInferenceBeamSearch(self.model,
                                                             beam_size=self.hparams.beam_size,
-                                                            n_best=self.hparams.n_best,
                                                             max_len=self.hparams.max_len,
                                                             pad_token=self.tgt_pad_token_i,
                                                             bos_token=self.tgt_bos_token_i,
@@ -87,7 +86,6 @@ class TranslationModel(LightningModule):
         elif self.hparams.generation == "nucleus":
             self.generator = TranslationInferenceNucleusClassic(self.model,
                                                                 beam_size=self.hparams.beam_size,
-                                                                n_best=self.hparams.beam_size,
                                                                 max_len=self.hparams.max_len,
                                                                 pad_token=self.tgt_pad_token_i,
                                                                 bos_token=self.tgt_bos_token_i,

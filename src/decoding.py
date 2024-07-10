@@ -50,29 +50,27 @@ class TranslationInferenceGreedy:
 class TranslationInferenceBeamSearch:
     """
     Basic beam search decoding for a batch of sequences.
+    Inspired by jarobyte91 src/pytorch_beam_search/seq2seq/search_algorithms.py
     """
 
     def __init__(self,
                  model,  # TranslationModel
                  beam_size: int,
-                 n_best: int,
                  max_len: int,
                  pad_token: int,
                  bos_token: int,
                  eos_token: int):
         self.model = model
         self.beam_size = beam_size
-        self.n_best = n_best
         self.max_len = max_len
         self.pad_token = pad_token
         self.bos_token = bos_token
         self.eos_token = eos_token
 
-        assert self.beam_size >= self.n_best
         assert self.max_len > 1
 
     def __str__(self):
-        return f"Beam search decoding (beam_size={self.beam_size}, n_best={self.n_best}, max_len={self.max_len})"
+        return f"Beam search decoding (beam_size={self.beam_size}, max_len={self.max_len})"
 
     def generate(self, src: 'torch.LongTensor') -> 'torch.LongTensor':
         bs, _ = src.size()
