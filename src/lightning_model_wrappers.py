@@ -101,7 +101,7 @@ class TranslationModel(LightningModule):
                 bos_token=self.tgt_bos_token_i,
                 eos_token=self.tgt_eos_token_i
             )
-        elif self.hparams.generation == "nucleus_speculative":
+        elif self.hparams.generation == "beam_search_speculative":
             self.generator = TranslationInferenceBeamSearchSpeculativeUnbatched(
                 self.model,
                 max_len=self.hparams.max_len,
@@ -116,7 +116,7 @@ class TranslationModel(LightningModule):
             )
 
         else:
-            options = ", ".join(["beam_search", "greedy", "nucleus", "greedy_speculative", "nucleus_speculative"])
+            options = ", ".join(["beam_search", "greedy", "nucleus", "greedy_speculative", "beam_search_speculative"])
             raise ValueError(
                 f'Unknown generation option {self.hparams.generation}. Options are {options}.')
 
