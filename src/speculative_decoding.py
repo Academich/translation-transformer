@@ -430,6 +430,7 @@ class TranslationInferenceGreedySpeculative:
         self.eos_token = eos_token
 
         self.n_speculative_tokens = n_speculative_tokens
+        self.left_pad_token = -1
 
     def __str__(self):
         return f"Greedy speculative decoding (n_speculative_tokens={self.n_speculative_tokens}, max_len={self.max_len})"
@@ -460,9 +461,9 @@ class TranslationInferenceGreedySpeculative:
                                        dim=-1).reshape(b_size * n_drafts, -1)
 
             # Handle the different length of every sequence
-            pos_enc_offset = (draft_sequence == -1).int().sum(-1).reshape(-1, 1)
-            generated_tokens = generated_tokens.masked_fill(generated_tokens == -1, self.pad_token)
-            draft_sequence = draft_sequence.masked_fill(draft_sequence == -1, self.pad_token)
+            pos_enc_offset = (draft_sequence == self.left_pad_token).int().sum(-1).view(-1, 1)
+            generated_tokens = generated_tokens.masked_fill(generated_tokens == self.left_pad_token, self.pad_token)
+            draft_sequence = draft_sequence.masked_fill(draft_sequence == self.left_pad_token, self.pad_token)
 
             # Copy memory and memory mask along the batch dimension to match the new effective batch size
             memory_inflated = memory.unsqueeze(1).repeat(1, n_drafts, 1, 1)
@@ -491,7 +492,8 @@ class TranslationInferenceGreedySpeculative:
 
             chosen = torch.gather(pred_tokens, 1,
                                   draft_i.unsqueeze(-1).expand(b_size, 1, pred_tokens.size(-1))).squeeze(1)
-            pred_tokens = chosen.masked_fill(torch.arange(pred_tokens.size(-1)).type_as(n_accepted) > n_accepted, -1)
+            pred_tokens = chosen.masked_fill(torch.arange(pred_tokens.size(-1)).type_as(n_accepted) > n_accepted,
+                                             self.left_pad_token)
 
             generated_tokens = torch.cat(
                 (generated_tokens,
@@ -507,8 +509,9 @@ class TranslationInferenceGreedySpeculative:
 
                 current_finished_tokens = generated_tokens[current_finished_ids]
                 current_finished_tokens = move_pads_to_the_right(current_finished_tokens, self.pad_token)
-                current_finished_tokens = current_finished_tokens.masked_fill(current_finished_tokens == -1,
-                                                                              self.pad_token)
+                current_finished_tokens = current_finished_tokens.masked_fill(
+                    current_finished_tokens == self.left_pad_token,
+                    self.pad_token)
                 current_finished_tokens = trim_right_pads(current_finished_tokens, self.pad_token)
 
                 finished_predictions[batch_finished_indices, :current_finished_tokens.size(1)] = current_finished_tokens
@@ -522,9 +525,9 @@ class TranslationInferenceGreedySpeculative:
             if batch_indices.nelement() == 0:
                 break
 
-            generated_tokens = move_pads_to_the_left(generated_tokens, -1)
-            generated_tokens = generated_tokens.masked_fill(generated_tokens == self.pad_token, -1)
-            generated_tokens = trim_left_pads(generated_tokens, -1)
+            generated_tokens = move_pads_to_the_left(generated_tokens, self.left_pad_token)
+            generated_tokens = generated_tokens.masked_fill(generated_tokens == self.pad_token, self.left_pad_token)
+            generated_tokens = trim_left_pads(generated_tokens, self.left_pad_token)
 
         return finished_predictions.unsqueeze(1)
 
