@@ -1,6 +1,7 @@
 import torch
 from torch.nn.utils.rnn import pad_sequence
 
+
 def move_pads_to_the_right(arr: torch.Tensor, pad_token: int = 0) -> torch.Tensor:
     """
     Moves pad tokens "pad_tokens" from the left side of the tensor to the right.
@@ -32,6 +33,17 @@ def trim_left_pads(tensor_t, pad_id: int):
     # number of left columns filled with the pad id
     padded_columns_num = ((tensor_t == pad_id).sum(0) == rows_num).sum()
     return tensor_t[:, padded_columns_num:]
+
+
+def trim_right_pads(tensor_t, pad_id: int):
+    """
+    Remove columns from the right that contain only PAD tokens.
+    tensor_t is supposed to have PAD tokens only on the left
+    """
+    rows_num, t_length = tensor_t.size()
+    # number of left columns filled with the pad id
+    padded_columns_num = ((tensor_t == pad_id).sum(0) == rows_num).sum()
+    return tensor_t[:, :t_length - padded_columns_num]
 
 
 class TranslationInferenceBeamSearchSpeculativeUnbatched:
@@ -482,9 +494,7 @@ class TranslationInferenceGreedySpeculative:
                 current_finished_tokens = move_pads_to_the_right(current_finished_tokens)
                 current_finished_tokens = current_finished_tokens.masked_fill(current_finished_tokens == -1,
                                                                               self.pad_token)
-                current_finished_tokens = current_finished_tokens[:, :-(
-                        (current_finished_tokens == self.pad_token).sum(dim=0) == current_finished_tokens.size(
-                    0)).sum()]
+                current_finished_tokens = trim_right_pads(current_finished_tokens, self.pad_token)
 
                 finished_predictions[batch_finished_indices, :current_finished_tokens.size(1)] = current_finished_tokens
 
