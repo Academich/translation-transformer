@@ -1,5 +1,5 @@
 import torch
-
+from torch.nn.utils.rnn import pad_sequence
 
 def move_pads_to_the_right(arr: torch.Tensor, pad_token: int = 0) -> torch.Tensor:
     """
@@ -511,6 +511,9 @@ def num_speculative_tokens_to_accept(arr: torch.BoolTensor):
 
 
 class TranslationInferenceGreedySpeculativeUnbatched:
+    """
+    Speculative greedy decoding that iterates over the batch dimension.
+    """
 
     def __init__(self,
                  model,  # TranslationModel
@@ -528,7 +531,11 @@ class TranslationInferenceGreedySpeculativeUnbatched:
         self.n_speculative_tokens = n_speculative_tokens
 
     def __str__(self):
-        return f"Greedy speculative decoding (n_speculative_tokens={self.n_speculative_tokens}, max_len={self.max_len})"
+        return f"Greedy speculative decoding unbatched (n_speculative_tokens={self.n_speculative_tokens}, max_len={self.max_len})"
+
+    def get_drafts(self, s: torch.Tensor) -> torch.Tensor:
+        b_size, length = s.size()
+        return s.unfold(-1, min(self.n_speculative_tokens, length - 1), 1)
 
     def generate(self, src: 'torch.LongTensor') -> 'torch.LongTensor':
         b_size, src_len = src.size()
@@ -543,8 +550,9 @@ class TranslationInferenceGreedySpeculativeUnbatched:
         result = []
         for i in range(b_size):
             generated_tokens = torch.full((1, 1), self.bos_token).type_as(src).long()
-            draft_tokens = src_unbatched[i, :, 1:].unfold(-1, self.n_speculative_tokens, 1).squeeze(0)
-            n_drafts = draft_tokens.size(0)
+
+            draft_tokens = self.get_drafts(src_unbatched[i, :, 1:]).squeeze(0)
+            n_drafts, n_spec_tok = draft_tokens.size()
             iters = 0
             while generated_tokens.size(1) < self.max_len:
                 iters += 1
@@ -553,7 +561,7 @@ class TranslationInferenceGreedySpeculativeUnbatched:
                                                     memory_unbatched[i].repeat(n_drafts, 1, 1),
                                                     memory_pad_mask=src_pad_mask_unbatched[i].repeat(n_drafts, 1))
                 pred_tokens = torch.argmax(pred_logits, dim=2)
-                pred_tokens = pred_tokens[:, -(draft_tokens.size(1) + 1):]
+                pred_tokens = pred_tokens[:, -(n_spec_tok + 1):]
                 verification = draft_tokens == pred_tokens[:, :-1]
                 _range = verification.cumsum(-1)
                 accepted_in_drafts = (torch.arange(1, verification.size(1) + 1).type_as(_range) == _range)

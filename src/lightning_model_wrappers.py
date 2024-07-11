@@ -12,7 +12,7 @@ from pytorch_lightning.utilities.types import STEP_OUTPUT
 from tokenization import GenericTokenizer
 from decoding import TranslationInferenceGreedy, TranslationInferenceBeamSearch
 from speculative_decoding import TranslationInferenceNucleusClassic, \
-    TranslationInferenceGreedySpeculative, TranslationInferenceBeamSearchSpeculativeUnbatched
+    TranslationInferenceGreedySpeculativeUnbatched, TranslationInferenceBeamSearchSpeculativeUnbatched
 from utils import NoamLRSchedule, ConstantLRSchedule, calc_token_acc, calc_sequence_acc
 
 
@@ -93,7 +93,7 @@ class TranslationModel(LightningModule):
 
         elif self.hparams.generation == "greedy_speculative":
             assert self.hparams.n_speculative_tokens > 0, "Number of speculative tokens must be a positive integer."
-            self.generator = TranslationInferenceGreedySpeculative(
+            self.generator = TranslationInferenceGreedySpeculativeUnbatched(
                 self.model,
                 max_len=self.hparams.max_len,
                 n_speculative_tokens=self.hparams.n_speculative_tokens,
