@@ -68,7 +68,7 @@ class TranslationInferenceBeamSearchSpeculativeUnbatched:
         self.log_prob_extra_pad = 2
 
     def __str__(self):
-        return f"NucleusSpeculativeUnbatched decoding (max_len={self.max_len}, nucleus={self.nucleus_for_sampling})"
+        return f"BeamSearchSpeculativeUnbatched decoding (n_best={self.n_best}, draftlen={self.draft_len}, max_len={self.max_len})"
 
     def sample(self, curr_lines, curr_log_probs_history, pred_logits, chosen_drafts, n_accepted=None):
         """
