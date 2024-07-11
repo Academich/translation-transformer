@@ -443,7 +443,7 @@ class TranslationInferenceGreedySpeculative:
 
         src_pad_mask = (src == self.model.src_pad_token_i).bool()
         memory = self.model.encode_src(src, src_pad_mask)
-        voc_size = memory.size(2)
+        emb_dim = memory.size(2)
 
         generated_tokens = torch.full((b_size, 1), self.bos_token).type_as(src).long()
         draft_tokens = self.get_drafts(src[:, 1:])  # Not including bos_token in drafts
@@ -454,17 +454,26 @@ class TranslationInferenceGreedySpeculative:
         while generated_tokens.size(1) < self.max_len:
             iters += 1
             b_size = batch_indices.size(0)
+
+            # Attach every draft to every sequence decoded so far
             draft_sequence = torch.cat([generated_tokens.unsqueeze(1).repeat(1, n_drafts, 1), draft_tokens],
                                        dim=-1).reshape(b_size * n_drafts, -1)
+
+            # Handle the different length of every sequence
             pos_enc_offset = (draft_sequence == -1).int().sum(-1).reshape(-1, 1)
             generated_tokens = generated_tokens.masked_fill(generated_tokens == -1, self.pad_token)
             draft_sequence = draft_sequence.masked_fill(draft_sequence == -1, self.pad_token)
 
+            # Copy memory and memory mask along the batch dimension to match the new effective batch size
+            memory_inflated = memory.unsqueeze(1).repeat(1, n_drafts, 1, 1)
+            memory_inflated = memory_inflated.view(b_size * n_drafts, -1, emb_dim)
+            src_pad_mask_inflated = src_pad_mask.unsqueeze(1).repeat(1, n_drafts, 1)
+            src_pad_mask_inflated = src_pad_mask_inflated.view(b_size * n_drafts, -1)
+
+            # Run the decoder and sample from the predicted distributions
             pred_logits = self.model.decode_tgt(draft_sequence,
-                                                memory.unsqueeze(1).repeat(1, n_drafts, 1, 1).reshape(b_size * n_drafts,
-                                                                                                      -1, voc_size),
-                                                memory_pad_mask=src_pad_mask.unsqueeze(1).repeat(1, n_drafts, 1).view(
-                                                    b_size * n_drafts, -1),
+                                                memory_inflated,
+                                                memory_pad_mask=src_pad_mask_inflated,
                                                 pos_enc_offset=pos_enc_offset)
             pred_tokens = torch.argmax(pred_logits, dim=2)
 
@@ -497,7 +506,7 @@ class TranslationInferenceGreedySpeculative:
                 batch_finished_indices = batch_indices[current_finished_mask]
 
                 current_finished_tokens = generated_tokens[current_finished_ids]
-                current_finished_tokens = move_pads_to_the_right(current_finished_tokens)
+                current_finished_tokens = move_pads_to_the_right(current_finished_tokens, self.pad_token)
                 current_finished_tokens = current_finished_tokens.masked_fill(current_finished_tokens == -1,
                                                                               self.pad_token)
                 current_finished_tokens = trim_right_pads(current_finished_tokens, self.pad_token)
@@ -515,8 +524,7 @@ class TranslationInferenceGreedySpeculative:
 
             generated_tokens = move_pads_to_the_left(generated_tokens, -1)
             generated_tokens = generated_tokens.masked_fill(generated_tokens == self.pad_token, -1)
-            generated_tokens = generated_tokens[:, ((generated_tokens == -1).sum(
-                dim=0) == b_size).sum():]  # Strip columns on the left that are all pads
+            generated_tokens = trim_left_pads(generated_tokens, -1)
 
         return finished_predictions.unsqueeze(1)
 
