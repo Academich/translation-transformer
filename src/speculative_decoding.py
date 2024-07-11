@@ -434,6 +434,10 @@ class TranslationInferenceGreedySpeculative:
     def __str__(self):
         return f"Greedy speculative decoding (n_speculative_tokens={self.n_speculative_tokens}, max_len={self.max_len})"
 
+    def get_drafts(self, s: torch.Tensor) -> torch.Tensor:
+        _, length = s.size()
+        return s.unfold(-1, min(self.n_speculative_tokens, length - 1), 1)
+
     def generate(self, src: 'torch.LongTensor') -> 'torch.LongTensor':
         b_size, src_len = src.size()
 
@@ -442,8 +446,8 @@ class TranslationInferenceGreedySpeculative:
         voc_size = memory.size(2)
 
         generated_tokens = torch.full((b_size, 1), self.bos_token).type_as(src).long()
-        draft_tokens = src[:, 1:].unfold(-1, self.n_speculative_tokens, 1)
-        n_drafts = draft_tokens.size(1)
+        draft_tokens = self.get_drafts(src[:, 1:])  # Not including bos_token in drafts
+        _, n_drafts, n_spec_tok = draft_tokens.size()
         iters = 0
         finished_predictions = torch.full((b_size, self.max_len), self.pad_token).type_as(src)
         batch_indices = torch.arange(b_size).type_as(src)
@@ -463,7 +467,9 @@ class TranslationInferenceGreedySpeculative:
                                                     b_size * n_drafts, -1),
                                                 pos_enc_offset=pos_enc_offset)
             pred_tokens = torch.argmax(pred_logits, dim=2)
-            pred_tokens = pred_tokens[:, -(self.n_speculative_tokens + 1):]
+
+            # Select and keep the draft with the largest number of accepted tokens
+            pred_tokens = pred_tokens[:, -(n_spec_tok + 1):]
             verification = draft_tokens.reshape(b_size * n_drafts, -1) == pred_tokens[:, :-1]
             _range = verification.cumsum(-1)
             accepted_in_drafts = (torch.arange(1, verification.size(1) + 1).type_as(_range) == _range)
