@@ -1,7 +1,7 @@
 PROJECT=<>/translation-transformer
 VERSION=transformer_6_6_USPTO_50K_augm_20_rsmiles
 
-CONFIG=<>/rxn_pred_vanilla_transformer.yaml
+CONFIG=<>/config.yaml
 
 DATA=USPTO_50K_augm_20_rsmiles_no_augm_test
 DATA_PATH=<>/${DATA}

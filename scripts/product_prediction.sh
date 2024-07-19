@@ -1,7 +1,7 @@
 PROJECT=<>/translation-transformer
 VERSION=transformer_vanilla_4_4_low_pad_tgt_batch
 
-CONFIG=<>/config_fixed.yaml
+CONFIG=<>/config.yaml
 
 DATA=MIT_mixed
 DATA_PATH=<>/${DATA}
