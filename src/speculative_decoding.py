@@ -215,9 +215,6 @@ class TranslationInferenceBeamSearchSpeculativeUnbatched:
                 pred_logits = self.model.decode_tgt(draft_sequence, memory_i.repeat(n_candidates, 1, 1),
                                                     memory_pad_mask=memory_pad_mask_i.repeat(n_candidates, 1),
                                                     pos_enc_offset=pos_enc_offset)
-                # # # This one we use only for debugging:
-                # pred_logits = self.model.decode_tgt(draft_sequence, memory_i.repeat(n_candidates, 1, 1),
-                #                                     memory_pad_mask=memory_pad_mask_i.repeat(n_candidates, 1))
                 #  -> (n_candidates * n_drafts, curr_len + draft_len, vocab_size)
                 vocab_size = pred_logits.shape[-1]
                 pred_logits = pred_logits[:, -(draft_len + 1):, :]
