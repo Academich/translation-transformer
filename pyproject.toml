@@ -1,8 +1,0 @@
-[tool.mypy]
-exclude = ".git,*tests*,./build,.tests/,.mypy*,.pytest*,*.egg*"
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-
-[tool.coverage.run]
-relative_files = true
