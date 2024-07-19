@@ -2,8 +2,7 @@ from pathlib import Path
 
 from pytorch_lightning.cli import LightningCLI
 
-from models import VanillaTransformerTranslationLightningModule, \
-    TransformerEncMambaTransformerDecTranslationLightningModule
+from models import VanillaTransformerTranslationLightningModule
 from data_wrappers import Seq2SeqDM
 from tasks.reaction_prediction.tokenizer import ChemSMILESTokenizer
 
