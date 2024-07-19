@@ -185,7 +185,7 @@ class TranslationInferenceBeamSearchSpeculativeUnbatched:
         result = []
 
         for i in range(b_size):
-            drafts = self.build_drafts(src_unbatched[i], self.draft_mode)
+            drafts = self.get_drafts(src_unbatched[i], self.draft_mode)
             # -> (self.max_drafts_num, self.draft_len)
 
             n_drafts, draft_len = drafts.size()
@@ -366,7 +366,7 @@ class TranslationInferenceBeamSearchSpeculativeUnbatched:
         sorted_log_probs, sorted_inds = candidates_log_probs.sort(descending=descending)
         return candidates[sorted_inds], candidates_log_probs_history[sorted_inds]
 
-    def build_drafts(self, src_unbatched: 'torch.LongTensor', draft_mode: bool):
+    def get_drafts(self, src_unbatched: 'torch.LongTensor', draft_mode: bool):
         if draft_mode:
             src_unbatched_i = src_unbatched[:, 1:]
             src_unbatched_i_pads = (src_unbatched_i == self.pad_token).int().sum(-1)
