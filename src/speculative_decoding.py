@@ -84,6 +84,10 @@ class TranslationInferenceBeamSearchSpeculativeUnbatched:
 
     def sample(self, curr_lines, curr_log_probs_history, pred_logits, chosen_drafts, n_accepted=None):
         """
+        This function samples all possible resulting tokens lines in the frames of the chosen drafts. Each draft can
+        produce (self.max_num_positions_for_sampling - 1) * num_of_approved_tokens + self.max_num_positions_for_sampling
+        at max.
+
         :param curr_lines: tensor (n_candidates, len_),
         :param curr_log_probs_history: tensor (n_candidates, len_),
         :param pred_logits: tensor (n_candidates, draft_len + 1, vocab_size),
@@ -217,41 +221,59 @@ class TranslationInferenceBeamSearchSpeculativeUnbatched:
                                                     pos_enc_offset=pos_enc_offset)
                 #  -> (n_candidates * n_drafts, curr_len + draft_len, vocab_size)
                 vocab_size = pred_logits.shape[-1]
+                ###### Choosing the best draft for each candidate. We consider a draft with the biggest number of
+                # approved tokens as the best draft for the given candidate. #########################################
                 pred_logits = pred_logits[:, -(draft_len + 1):, :]
                 #   -> (n_candidates * n_drafts, draft_len + 1, vocab_size)
+
+                # All unapproved tokens in masked_probs have zero probability
                 masked_probs = mask_with_num_logits_according_nucleus(pred_logits, nucleus=0.9975,
                                                                       max_num_of_unmasked_positions=5,
                                                                       num="-inf").softmax(-1)
                 #   -> (n_candidates * n_drafts, draft_len + 1, vocab_size)
                 masked_probs = masked_probs.reshape(n_candidates, n_drafts, draft_len + 1, vocab_size)
-                draft_tokens = draft_tokens.reshape(n_candidates, n_drafts, draft_len)
+                draft_tokens = draft_tokens.reshape(n_candidates, n_drafts, draft_len)   # each candidate has the same
+                # collection of drafts
 
                 n_accepted_in_drafts = self.calculate_n_accepted_in_drafts(draft_tokens, masked_probs)
-                #   ->(num, n_drafts)
+                #   ->(n_candidates, n_drafts)
 
+                # Each candidate needs its best draft. Choose the draft with the biggest number of approved tokens
+                # for each candidate
                 n_accepted, draft_i = n_accepted_in_drafts.topk(1, dim=-1)
                 # (n_candidates, n_drafts) -> (n_candidates, 1)
                 chosen_drafts = torch.gather(draft_tokens, dim=1,
                                              index=draft_i.unsqueeze(-1).expand(n_candidates, 1, draft_len)).squeeze(1)
                 #   -> (n_candidates, draft_len)
-
+                ########################################################################################################
                 pred_logits = pred_logits.reshape(n_candidates, n_drafts, draft_len + 1, vocab_size)
 
+                # Further we need information only about chosen drafts
                 pred_logits = torch.gather(pred_logits, dim=1, index=draft_i.unsqueeze(-1).unsqueeze(-1).
                                            expand(n_candidates, 1, draft_len + 1, vocab_size)).squeeze(1)
                 #   -> (n_candidates, draft_len + 1, vocab_size)
 
+                # Sample all possible lines within the chosen drafts.
+                # new_candidates have the initial tokens and the new ones.
                 new_candidates, new_log_probs_history = \
                     self.sample(generated_tokens, log_probs_history, pred_logits,
                                 chosen_drafts, n_accepted.squeeze(-1))
-                # generated_tokens: (n_candidates, curr_len),
-                # log_probs_history: (n_candidates, curr_len),
-                # pred_logits: (n_candidates, draft_len + 1, vocab_size),
-                # chosen_drafts: (n_candidates, draft_len)
-                # n_accepted: (n_candidates) or None = None
-                #   ->  new_candidates: (num_lines, len),
-                #       new_log_probs_history: (num_lines, len)
+                # generated_tokens: candidates lines from previous round (the old tokens),
+                #                   tensor of size (n_candidates, curr_len),
+                # log_probs_history: log probs of generated_tokens,
+                #                   tensor of size  (n_candidates, curr_len),
+                # pred_logits: logits of the chosen drafts` tokens,
+                #                   tensor of size  (n_candidates, draft_len + 1, vocab_size),
+                # chosen_drafts: the chosen drafts` tokens,
+                #                   tensor of size  (n_candidates, draft_len)
+                # n_accepted: number of approved tokens in each draft,
+                #                   tensor of size (n_candidates) or None (in this case it will be recalculated inside
+                #                   self.sample() according to self.nucleus_for_sampling parameter)
+                #   ->  new_candidates: tensor of size (num_lines, len),
+                #       new_log_probs_history: tensor of size (num_lines, len)
 
+                # We don't want to give the model lines with eos just to produce pads.
+                # So we store the best sequences with eos.
                 if finished_candidates_t is None:
                     new_candidates, new_log_probs_history = self.sort(new_candidates, new_log_probs_history,
                                                                       descending=True)
@@ -329,19 +351,28 @@ class TranslationInferenceBeamSearchSpeculativeUnbatched:
             return result
 
     def calculate_n_accepted_in_drafts(self, draft_tokens, masked_probs):
-        # masked_probs: tensor of size (n_candidates, n_drafts, draft_len + 1, vocab_size)
-        # draft_tokens: tensor of size (n_candidates, n_drafts, draft_len)
+        """
+        This function calcalates the number of approved tokens in each draft for each candidate.
+
+        :param draft_tokens: tensor of size (n_candidates, n_drafts, draft_len),
+        :param masked_probs (all unapproved tokens in masked_probs supposed to be equal to 0.):
+                             tensor of size (n_candidates, n_drafts, draft_len + 1, vocab_size),
+
+        :return:
+          ->  returns the number of approved tokens in each draft for each candidate:
+                             tensor of size  (n_candidates, n_drafts)
+
+        """
         draft_tokens_probs = torch.gather(masked_probs[:, :, :-1, :], dim=-1, index=draft_tokens.unsqueeze(-1)).squeeze(
             -1)
         #   -> (n_candidates, n_drafts, draft_len)
         verification = draft_tokens_probs != 0.
-        # num = n_candidates
 
-        _range = verification.cumsum(-1)  # (num, n_drafts, draft_len)
+        _range = verification.cumsum(-1)  # (n_candidates, n_drafts, draft_len)
         accepted_in_drafts_bool = (torch.arange(1, verification.size(2) + 1).unsqueeze(0).unsqueeze(0).type_as(
-            _range) == _range)  # (num, n_drafts, draft_len)
+            _range) == _range)  # (n_candidates, n_drafts, draft_len)
 
-        return accepted_in_drafts_bool.sum(-1)  # (num, n_drafts, draft_len) -> (num, n_drafts)
+        return accepted_in_drafts_bool.sum(-1)  # (n_candidates, n_drafts, draft_len) -> (n_candidates, n_drafts)
 
     def make_left_pad_tail(self, t):
         candidates_num, curr_len = t.size()
@@ -378,26 +409,41 @@ class TranslationInferenceBeamSearchSpeculativeUnbatched:
 
 
 def mask_with_num_logits_according_nucleus(pred_logits, nucleus, max_num_of_unmasked_positions, num=0.):
-    n, curr_len, vocab_size = pred_logits.size()  # (n_candidates, draft_len + 1, vocab_size)
-    pred_logits = pred_logits.reshape(n * curr_len, vocab_size)  # -> (n * curr_len, vocab_size)
+    """
+    This function fills  with float(num) all unapproved tokens logits. It uses nucleus parameter to decide which logits
+    are big enough. No more than max_num_of_unmasked_positions but at least the best logit will be left unmasked
+    for each distribution.
+    If nucleus < 0, then it works as gready mode. It masks everything accept the best token in each distribution.
+    If nucleus > 1, then it works as beam search mode. It masks nothing and chooses top n tokens in each distribution,
+        where n is equal to max_num_of_unmasked_positions.
+    If 0 < nucleus < 1 (we recommend nucleus = 0.9975), it works as top k mode. It masks all tokens logits with
+    cumulative probability above or equal to the nucleus parameter. But no more than max_num_of_unmasked_positions will
+    be left unmasked in each row.
+
+    """
+    n_candidates, curr_len, vocab_size = pred_logits.size()  # (n_candidates, draft_len + 1, vocab_size)
+    pred_logits = pred_logits.reshape(n_candidates * curr_len, vocab_size)  # -> (n_candidates * curr_len, vocab_size)
 
     sorted_logits, sorted_indices = torch.sort(pred_logits,
-                                               descending=True)  # -> (n * curr_len, vocab_size)
-    cumulative_probs = torch.cumsum(sorted_logits.softmax(-1), dim=-1)  # -> (n * curr_len, vocab_size)
+                                               descending=True)  # -> (n_candidates * curr_len, vocab_size)
+    cumulative_probs = torch.cumsum(sorted_logits.softmax(-1), dim=-1)  # -> (n_candidates * curr_len, vocab_size)
 
-    # Remove tokens with cumulative probability above the threshold
+
     cumulative_probs = torch.roll(cumulative_probs, 1, dims=-1)
-    cumulative_probs[:, 0] = nucleus - 1
-    keep_candidates_mask = cumulative_probs < nucleus  # -> (n * curr_len, vocab_size)
 
-    keep_candidates_mask[:, max_num_of_unmasked_positions:] = False
-    # no more than max_num_of_unmasked_positions
+    cumulative_probs[:, 0] = nucleus - 1  # this protects the best probability in each distribution
+    # Remove tokens with cumulative probability above or equal to the threshold (nucleus parameter).
+    # At least the best probability in each row will be left unmasked
+    keep_candidates_mask = cumulative_probs < nucleus  # -> (n_candidates * curr_len, vocab_size)
 
-    sorted_logits.masked_fill_(~keep_candidates_mask, float(num))
+    keep_candidates_mask[:, max_num_of_unmasked_positions:] = False  # no more than max_num_of_unmasked_positions
+
+    sorted_logits.masked_fill_(~keep_candidates_mask, float(num))  # the all unapproved tokens logits
+    # will be set equal to float(num)
 
     masked_logits_according_nucleus = torch.gather(sorted_logits, 1, sorted_indices.argsort(1))
-    # -> (n * curr_len, vocab_size)
-    return masked_logits_according_nucleus.reshape(n, curr_len, vocab_size)
+    # -> (n_candidates * curr_len, vocab_size)
+    return masked_logits_according_nucleus.reshape(n_candidates, curr_len, vocab_size)
 
 
 def sort(candidates, candidates_log_probs, descending=True):
