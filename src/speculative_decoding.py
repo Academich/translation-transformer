@@ -84,9 +84,9 @@ class TranslationInferenceBeamSearchSpeculativeUnbatched:
 
     def sample(self, curr_lines, curr_log_probs_history, pred_logits, chosen_drafts, n_accepted=None):
         """
-        This function samples all possible resulting tokens lines in the frames of the chosen drafts. Each draft can
+        This function samples all possible sequences within a selected draft. Each draft can
         produce (self.max_num_positions_for_sampling - 1) * num_of_approved_tokens + self.max_num_positions_for_sampling
-        at max.
+        at most.
 
         :param curr_lines: tensor (n_candidates, len_),
         :param curr_log_probs_history: tensor (n_candidates, len_),
@@ -221,8 +221,8 @@ class TranslationInferenceBeamSearchSpeculativeUnbatched:
                                                     pos_enc_offset=pos_enc_offset)
                 #  -> (n_candidates * n_drafts, curr_len + draft_len, vocab_size)
                 vocab_size = pred_logits.shape[-1]
-                ###### Choosing the best draft for each candidate. We consider a draft with the biggest number of
-                # approved tokens as the best draft for the given candidate. #########################################
+                ###### Choosing the best draft for each candidate. The draft with the biggest number of
+                # approved tokens is the best draft for the given candidate. #########################################
                 pred_logits = pred_logits[:, -(draft_len + 1):, :]
                 #   -> (n_candidates * n_drafts, draft_len + 1, vocab_size)
 
@@ -232,7 +232,7 @@ class TranslationInferenceBeamSearchSpeculativeUnbatched:
                                                                       num="-inf").softmax(-1)
                 #   -> (n_candidates * n_drafts, draft_len + 1, vocab_size)
                 masked_probs = masked_probs.reshape(n_candidates, n_drafts, draft_len + 1, vocab_size)
-                draft_tokens = draft_tokens.reshape(n_candidates, n_drafts, draft_len)   # each candidate has the same
+                draft_tokens = draft_tokens.reshape(n_candidates, n_drafts, draft_len)  # each candidate has the same
                 # collection of drafts
 
                 n_accepted_in_drafts = self.calculate_n_accepted_in_drafts(draft_tokens, masked_probs)
@@ -352,10 +352,10 @@ class TranslationInferenceBeamSearchSpeculativeUnbatched:
 
     def calculate_n_accepted_in_drafts(self, draft_tokens, masked_probs):
         """
-        This function calcalates the number of approved tokens in each draft for each candidate.
+        This function calculates the number of approved tokens in each draft for each candidate.
 
         :param draft_tokens: tensor of size (n_candidates, n_drafts, draft_len),
-        :param masked_probs (all unapproved tokens in masked_probs supposed to be equal to 0.):
+        :param masked_probs: (all unapproved tokens in masked_probs are supposed to be equal to 0.)
                              tensor of size (n_candidates, n_drafts, draft_len + 1, vocab_size),
 
         :return:
@@ -410,16 +410,15 @@ class TranslationInferenceBeamSearchSpeculativeUnbatched:
 
 def mask_with_num_logits_according_nucleus(pred_logits, nucleus, max_num_of_unmasked_positions, num=0.):
     """
-    This function fills  with float(num) all unapproved tokens logits. It uses nucleus parameter to decide which logits
+    This function fills all unapproved tokens' logits with float(num). It uses nucleus parameter to decide which logits
     are big enough. No more than max_num_of_unmasked_positions but at least the best logit will be left unmasked
     for each distribution.
-    If nucleus < 0, then it works as gready mode. It masks everything accept the best token in each distribution.
-    If nucleus > 1, then it works as beam search mode. It masks nothing and chooses top n tokens in each distribution,
+    If nucleus < 0, then it works in greedy mode. It masks everything accept the best token in each distribution.
+    If nucleus > 1, then it works in beam search mode. It masks nothing and chooses the top n tokens in each distribution,
         where n is equal to max_num_of_unmasked_positions.
-    If 0 < nucleus < 1 (we recommend nucleus = 0.9975), it works as top k mode. It masks all tokens logits with
+    If 0 < nucleus < 1 (we recommend nucleus = 0.9975), it works in top k mode. It masks all tokens' logits with
     cumulative probability above or equal to the nucleus parameter. But no more than max_num_of_unmasked_positions will
     be left unmasked in each row.
-
     """
     n_candidates, curr_len, vocab_size = pred_logits.size()  # (n_candidates, draft_len + 1, vocab_size)
     pred_logits = pred_logits.reshape(n_candidates * curr_len, vocab_size)  # -> (n_candidates * curr_len, vocab_size)
@@ -427,7 +426,6 @@ def mask_with_num_logits_according_nucleus(pred_logits, nucleus, max_num_of_unma
     sorted_logits, sorted_indices = torch.sort(pred_logits,
                                                descending=True)  # -> (n_candidates * curr_len, vocab_size)
     cumulative_probs = torch.cumsum(sorted_logits.softmax(-1), dim=-1)  # -> (n_candidates * curr_len, vocab_size)
-
 
     cumulative_probs = torch.roll(cumulative_probs, 1, dims=-1)
 
@@ -1123,40 +1121,3 @@ class TranslationInferenceNucleusClassic:
                 1]:
                 break
         return curr_lines  # (bs=1, 1 <= n_candidates <= beam_width, len)
-
-
-if __name__ == '__main__':
-    from models import VanillaTransformerTranslationLightningModule
-    from synthetic_tasks.copy_sequence.tokenizer import AsciiTokenizer
-    from torch.nn.utils.rnn import pad_sequence
-
-    torch.manual_seed(0)
-
-
-    def check_example(model: VanillaTransformerTranslationLightningModule,
-                      tokenizer: AsciiTokenizer,
-                      examples: list[str]):
-        res = model.generator.generate(
-            pad_sequence([torch.tensor(tokenizer.encode(s)) for s in examples], padding_value=0,
-                         batch_first=True)
-        )
-        print(res)
-        print(tokenizer.decode_batch(res.squeeze(1).numpy()))
-
-
-    tkz = AsciiTokenizer()
-    tkz.load_vocab("/home/ma/work/translation-transformer/data/copy_sequence/vocabs/vocab.json")
-    model = VanillaTransformerTranslationLightningModule(src_tokenizer=tkz, tgt_tokenizer=tkz,
-                                                         generation="greedy_speculative",
-                                                         beam_size=2,
-                                                         max_len=20,
-                                                         n_speculative_tokens=2
-                                                         )
-    ckpt = torch.load("/home/ma/work/translation-transformer/lightning_logs/copy_sequence/checkpoints/last.ckpt",
-                      map_location=torch.device("cpu"))
-    model.load_state_dict(ckpt["state_dict"])
-    check_example(
-        model,
-        tkz,
-        examples=["B"]
-    )
