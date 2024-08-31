@@ -35,7 +35,6 @@ class VanillaTransformer(nn.Module):
         self.activation = activation
         self.share_embeddings = share_embeddings
 
-    def create(self):
         # Embedding constructor
         self.src_token_featurizer = TokenEmbedding(self.src_vocab_size,
                                                    self.emb_dim, padding_idx=self.src_pad_token_i)
@@ -49,7 +48,6 @@ class VanillaTransformer(nn.Module):
         self.positional_encoding = PositionalEncoding(self.emb_dim)
 
         # Embedding updater
-
         self.transformer = nn.Transformer(d_model=self.emb_dim,
                                           nhead=self.num_heads,
                                           num_encoder_layers=self.num_enc_layers,
