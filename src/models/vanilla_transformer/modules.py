@@ -1,3 +1,4 @@
+import torch
 from torch import LongTensor, BoolTensor, Tensor
 from torch import nn
 
@@ -84,6 +85,7 @@ class VanillaTransformer(nn.Module):
         logits = self.next_token_classifier(tgt_emb)
         return logits
 
+    @torch.jit.export
     def encode_src(self, src: LongTensor, src_pad_mask: BoolTensor):
         # Embed tokens
         src_emb = self.positional_encoding(self.src_token_featurizer(src))
@@ -92,6 +94,7 @@ class VanillaTransformer(nn.Module):
         src_emb = self.transformer.encoder(src_emb, src_key_padding_mask=src_pad_mask)
         return src_emb
 
+    @torch.jit.export
     def decode_tgt(self, tgt: LongTensor, memory: Tensor, memory_pad_mask: BoolTensor,
                    pos_enc_offset: torch.LongTensor = torch.LongTensor([0])):
         _, tgt_seq_len = tgt.size()
