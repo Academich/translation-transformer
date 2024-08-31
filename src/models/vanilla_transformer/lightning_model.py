@@ -1,4 +1,4 @@
-from torch import Tensor
+import torch
 
 from models.vanilla_transformer.modules import VanillaTransformer
 from lightning_model_wrappers import TranslationModel
@@ -20,21 +20,22 @@ class VanillaTransformerTranslationLightningModule(TranslationModel):
                  ):
         super().__init__(**kwargs)
 
-    def _create_model(self) -> None:
-        self.model = VanillaTransformer(self.src_vocab_size,
-                                        self.tgt_vocab_size,
-                                        self.hparams.num_encoder_layers,
-                                        self.hparams.num_decoder_layers,
-                                        self.hparams.embedding_dim,
-                                        self.hparams.num_heads,
-                                        self.hparams.feedforward_dim,
-                                        self.hparams.dropout_rate,
-                                        self.hparams.activation,
-                                        self.hparams.share_embeddings,
-                                        self.src_pad_token_i,
-                                        self.tgt_pad_token_i)
-        self.model.create()
+    def _create_model(self) -> torch.nn.Module | torch.jit.ScriptModule:
+        model = VanillaTransformer(self.src_vocab_size,
+                                   self.tgt_vocab_size,
+                                   self.hparams.num_encoder_layers,
+                                   self.hparams.num_decoder_layers,
+                                   self.hparams.embedding_dim,
+                                   self.hparams.num_heads,
+                                   self.hparams.feedforward_dim,
+                                   self.hparams.dropout_rate,
+                                   self.hparams.activation,
+                                   self.hparams.share_embeddings,
+                                   self.src_pad_token_i,
+                                   self.tgt_pad_token_i)
+        model = torch.jit.script(model)
+        return model
 
-    def forward(self, batch: dict[str, Tensor]) -> Tensor:
+    def forward(self, batch: dict[str, torch.Tensor]) -> torch.Tensor:
         return self.model(batch["src_tokens"],
                           batch["tgt_tokens"][:, :-1])
