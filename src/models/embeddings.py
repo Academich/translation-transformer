@@ -49,7 +49,7 @@ class PositionalEncoding(nn.Module):
         # persistent=False tells PyTorch to not add the buffer to the state dict (e.g. when we save the model)
         self.register_buffer("pe", pe, persistent=False)
 
-    def forward(self, x: torch.Tensor, offset: torch.LongTensor | int = 0):
+    def forward(self, x: torch.Tensor, offset: torch.LongTensor = torch.LongTensor([0])):
         """
         If a sequence is padded from the left, can assign correct positional embeddings
         for meaningful tokens at the right positions.

@@ -95,7 +95,7 @@ class VanillaTransformer(nn.Module):
         return src_emb
 
     def decode_tgt(self, tgt: LongTensor, memory: Tensor, memory_pad_mask: BoolTensor,
-                   pos_enc_offset: LongTensor | int = 0):
+                   pos_enc_offset: torch.LongTensor = torch.LongTensor([0])):
         _, tgt_seq_len = tgt.size()
 
         # Embed tokens
