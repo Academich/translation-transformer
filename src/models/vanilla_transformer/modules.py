@@ -70,8 +70,8 @@ class VanillaTransformer(nn.Module):
         tgt_emb = self.positional_encoding(self.tgt_token_featurizer(tgt))
 
         # Update embeddings
-        src_pad_mask = (src == self.src_pad_token_i).bool()
-        tgt_pad_mask = (tgt == self.tgt_pad_token_i).bool()
+        src_pad_mask: torch.Tensor = torch.where(src != self.src_pad_token_i, torch.tensor(0.0), torch.tensor(float('-inf')))
+        tgt_pad_mask: torch.Tensor = torch.where(tgt != self.tgt_pad_token_i, torch.tensor(0.0), torch.tensor(float('-inf')))
         tgt_mask = self.transformer.generate_square_subsequent_mask(tgt_seq_len).type_as(tgt_emb)
         tgt_emb = self.transformer(src_emb,
                                    tgt_emb,
@@ -103,7 +103,7 @@ class VanillaTransformer(nn.Module):
         tgt_emb = self.positional_encoding(tgt_emb, offset=pos_enc_offset)
 
         # Update embeddings
-        tgt_pad_mask = (tgt == self.tgt_pad_token_i).bool()
+        tgt_pad_mask = torch.where(tgt != self.tgt_pad_token_i, torch.tensor(0.0), torch.tensor(float('-inf')))
         tgt_mask = self.transformer.generate_square_subsequent_mask(tgt_seq_len).type_as(tgt_emb)
         tgt_emb = self.transformer.decoder(tgt_emb,
                                            memory,
