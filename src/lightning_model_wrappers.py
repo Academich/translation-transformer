@@ -65,7 +65,7 @@ class TranslationModel(LightningModule):
         self.report_prediction_time = report_prediction_time
         self.prediction_start_time = None
 
-    def _create_model(self) -> nn.Module | torch.jit.ScriptModule:
+    def _create_model(self) -> nn.Module:
         raise NotImplementedError
 
     def _create_generator(self):

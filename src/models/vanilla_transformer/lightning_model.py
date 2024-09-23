@@ -20,7 +20,7 @@ class VanillaTransformerTranslationLightningModule(TranslationModel):
                  ):
         super().__init__(**kwargs)
 
-    def _create_model(self) -> torch.nn.Module | torch.jit.ScriptModule:
+    def _create_model(self) -> torch.nn.Module:
         model = VanillaTransformer(self.src_vocab_size,
                                    self.tgt_vocab_size,
                                    self.hparams.num_encoder_layers,
@@ -33,7 +33,6 @@ class VanillaTransformerTranslationLightningModule(TranslationModel):
                                    self.hparams.share_embeddings,
                                    self.src_pad_token_i,
                                    self.tgt_pad_token_i)
-        model = torch.jit.script(model)
         return model
 
     def forward(self, batch: dict[str, torch.Tensor]) -> torch.Tensor:
