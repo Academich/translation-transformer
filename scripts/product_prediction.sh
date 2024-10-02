@@ -1,13 +1,12 @@
-PROJECT=<>/translation-transformer
-VERSION=transformer_vanilla_4_4_low_pad_tgt_batch
+CKPT_DIR=checkpoints/reaction_prediction
 
-CONFIG=<>/config.yaml
+CONFIG=${CKPT_DIR}/config.yaml
 
 DATA=MIT_mixed
-DATA_PATH=<>/${DATA}
+DATA_PATH=data/${DATA}
 
 CKPT='last.ckpt'
-CKPT_PATH=<>/${CKPT}
+CKPT_PATH=${CKPT_DIR}/${CKPT}
 
 function run_prediction() {
   local GEN=${1:-}
@@ -33,17 +32,26 @@ function run_prediction() {
 
 }
 
-N_ATTEMPTS=5
+# Greedy decoding
+run_prediction greedy 1 10 product_results_greedy
 
-for i in $(seq 1 ${N_ATTEMPTS});
-do
-    for ((d = 1; d <= 20; d += 3));
-    do
-        run_prediction greedy_speculative 1 ${d} product_results_greedy ${i}
-    done
-done
+# Speculative greedy decoding
+run_prediction greedy_speculative 1 10 product_results_greedy
 
-for i in $(seq 1 ${N_ATTEMPTS});
-do
-    run_prediction greedy 1 10 product_results_greedy ${i}
-done
+
+#Uncomment to run predictions five times to estimate the spread of inference time
+#
+#N_ATTEMPTS=5
+#
+#for i in $(seq 1 ${N_ATTEMPTS});
+#do
+#    for ((d = 1; d <= 20; d += 3));
+#    do
+#        run_prediction greedy_speculative 1 ${d} product_results_greedy ${i}
+#    done
+#done
+#
+#for i in $(seq 1 ${N_ATTEMPTS});
+#do
+#    run_prediction greedy 1 10 product_results_greedy ${i}
+#done
