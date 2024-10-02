@@ -43,10 +43,13 @@ function run_prediction() {
 }
 
 # Beam search
-run_prediction beam_search 1 10 1 retrosynthesis_results_beam_search
+BATCH_SIZE=1
+N_BEST=10
+run_prediction beam_search ${BATCH_SIZE} ${N_BEST} 1 retrosynthesis_results_beam_search
 
 # Speculative beam search
-run_prediction beam_search_speculative 1 10 10 retrosynthesis_results_beam_search
+DRAFT_LEN=10
+run_prediction beam_search_speculative ${BATCH_SIZE} ${N_BEST} ${DRAFT_LEN} retrosynthesis_results_beam_search
 
 #Uncomment to run predictions five times to estimate the spread of inference time
 #
