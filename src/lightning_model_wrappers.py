@@ -56,8 +56,7 @@ class TranslationModel(LightningModule):
 
         self.criterion = nn.CrossEntropyLoss(reduction="mean")
 
-        self.model: nn.Module | None = None
-        self._create_model()
+        self.model = self._create_model()
         assert self.model is not None, \
             f"Override the _create_model method in {self.__class__} to assign an nn.Module to self.model"
 
@@ -66,7 +65,7 @@ class TranslationModel(LightningModule):
         self.report_prediction_time = report_prediction_time
         self.prediction_start_time = None
 
-    def _create_model(self):
+    def _create_model(self) -> nn.Module:
         raise NotImplementedError
 
     def _create_generator(self):

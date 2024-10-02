@@ -1,3 +1,4 @@
+import torch
 from torch import LongTensor, BoolTensor, Tensor
 from torch import nn
 
@@ -35,7 +36,6 @@ class VanillaTransformer(nn.Module):
         self.activation = activation
         self.share_embeddings = share_embeddings
 
-    def create(self):
         # Embedding constructor
         self.src_token_featurizer = TokenEmbedding(self.src_vocab_size,
                                                    self.emb_dim, padding_idx=self.src_pad_token_i)
@@ -49,7 +49,6 @@ class VanillaTransformer(nn.Module):
         self.positional_encoding = PositionalEncoding(self.emb_dim)
 
         # Embedding updater
-
         self.transformer = nn.Transformer(d_model=self.emb_dim,
                                           nhead=self.num_heads,
                                           num_encoder_layers=self.num_enc_layers,
@@ -70,8 +69,8 @@ class VanillaTransformer(nn.Module):
         tgt_emb = self.positional_encoding(self.tgt_token_featurizer(tgt))
 
         # Update embeddings
-        src_pad_mask = (src == self.src_pad_token_i).bool()
-        tgt_pad_mask = (tgt == self.tgt_pad_token_i).bool()
+        src_pad_mask: torch.Tensor = torch.where(src != self.src_pad_token_i, torch.tensor(0.0), torch.tensor(float('-inf')))
+        tgt_pad_mask: torch.Tensor = torch.where(tgt != self.tgt_pad_token_i, torch.tensor(0.0), torch.tensor(float('-inf')))
         tgt_mask = self.transformer.generate_square_subsequent_mask(tgt_seq_len).type_as(tgt_emb)
         tgt_emb = self.transformer(src_emb,
                                    tgt_emb,
@@ -95,7 +94,7 @@ class VanillaTransformer(nn.Module):
         return src_emb
 
     def decode_tgt(self, tgt: LongTensor, memory: Tensor, memory_pad_mask: BoolTensor,
-                   pos_enc_offset: LongTensor | int = 0):
+                   pos_enc_offset: torch.LongTensor = torch.LongTensor([0])):
         _, tgt_seq_len = tgt.size()
 
         # Embed tokens
@@ -103,7 +102,7 @@ class VanillaTransformer(nn.Module):
         tgt_emb = self.positional_encoding(tgt_emb, offset=pos_enc_offset)
 
         # Update embeddings
-        tgt_pad_mask = (tgt == self.tgt_pad_token_i).bool()
+        tgt_pad_mask = torch.where(tgt != self.tgt_pad_token_i, torch.tensor(0.0), torch.tensor(float('-inf')))
         tgt_mask = self.transformer.generate_square_subsequent_mask(tgt_seq_len).type_as(tgt_emb)
         tgt_emb = self.transformer.decoder(tgt_emb,
                                            memory,
