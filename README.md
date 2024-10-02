@@ -28,6 +28,13 @@ pip install -e .
 For reaction prediction, we used USPTO_MIT mixed from the [Molecular Transformer](https://github.com/pschwllr/MolecularTransformer.git) paper.
 For single-step retrosynthesis, we used USPTO50k as prepared in the [RSMILES](https://github.com/otori-bird/retrosynthesis) paper.
 
+Download USPTO MIT mixed:
+```commandline
+gdown https://drive.google.com/drive/folders/1fJ7Hm55IDevIi5Apna7v-rQBQStTH7Yg -O data/MIT_mixed --folder
+cd data/MIT_mixed
+python3 detokenize.py
+```
+
 Download USPTO50K:
 ```commandline
 gdown https://drive.google.com/drive/folders/1la4OgBKgm2K-IRwuV-GHUNjN3bcCrl6v -O data/USPTO50K --folder
