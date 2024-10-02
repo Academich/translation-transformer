@@ -1,19 +1,18 @@
-PROJECT=<>/translation-transformer
-VERSION=transformer_6_6_USPTO_50K_augm_20_rsmiles
+CKPT_DIR=checkpoints/single_step_retrosynthesis
 
-CONFIG=<>/config.yaml
+CONFIG=${CKPT_DIR}/config.yaml
 
-DATA=USPTO_50K_augm_20_rsmiles_no_augm_test
-DATA_PATH=<>/${DATA}
+DATA=USPTO50K
+DATA_PATH=data/${DATA}
 
 CKPT='step=337241-v_sq_acc=0.513-v_tk_acc=0.9904-v_l=0.0366.ckpt'
-CKPT_PATH=<>/${CKPT}
+CKPT_PATH=${CKPT_DIR}/${CKPT}
 
 function run_prediction() {
   local GEN=${1:-}
-  local BS=${2:-1}
-  local NBEST=${3:-5}
-  local N_SPEC_TOK=${4:-10}
+  local BS=${2:-1} # Batch size
+  local NBEST=${3:-5} # Number of best sequences
+  local N_SPEC_TOK=${4:-10} # Draft sequence length
   local OUTPUT_DIR=${5:-}
   local ATTEMPT=${6:-}
 
@@ -43,23 +42,31 @@ function run_prediction() {
 
 }
 
-N_ATTEMPTS=5
+# Beam search
+run_prediction beam_search 1 10 1 retrosynthesis_results_beam_search
 
-for i in $(seq 1 ${N_ATTEMPTS});
-do
-    for n in 5 10 25;
-    do
-        run_prediction beam_search 1 ${n} 1 retrosynthesis_results_beam_search ${i}
-    done
-done
+# Speculative beam search
+run_prediction beam_search_speculative 1 10 10 retrosynthesis_results_beam_search
 
-for i in $(seq 1 ${N_ATTEMPTS});
-do
-    for n in 5 10 25;
-    do
-      for ((d = 1; d <= 20; d += 3));
-        do
-          run_prediction beam_search_speculative 1 ${n} ${d} retrosynthesis_results_beam_search ${i}
-        done
-    done
-done
+#Uncomment to run predictions five times to estimate the spread of inference time
+#
+#N_ATTEMPTS=5
+#
+#for i in $(seq 1 ${N_ATTEMPTS});
+#do
+#    for n in 5 10 25;
+#    do
+#        run_prediction beam_search 1 ${n} 1 retrosynthesis_results_beam_search ${i}
+#    done
+#done
+#
+#for i in $(seq 1 ${N_ATTEMPTS});
+#do
+#    for n in 5 10 25;
+#    do
+#      for ((d = 1; d <= 20; d += 3));
+#        do
+#          run_prediction beam_search_speculative 1 ${n} ${d} retrosynthesis_results_beam_search ${i}
+#        done
+#    done
+#done
