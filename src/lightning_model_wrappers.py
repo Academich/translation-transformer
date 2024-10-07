@@ -60,7 +60,8 @@ class TranslationModel(LightningModule):
         assert self.model is not None, \
             f"Override the _create_model method in {self.__class__} to assign an nn.Module to self.model"
 
-        self._create_generator()
+        self.generator = self._create_generator()
+        print(self.generator)
 
         self.report_prediction_time = report_prediction_time
         self.prediction_start_time = None
@@ -70,20 +71,20 @@ class TranslationModel(LightningModule):
 
     def _create_generator(self):
         if self.hparams.generation == "greedy":
-            self.generator = TranslationInferenceGreedy(self.model,
+            return TranslationInferenceGreedy(self.model,
                                                         max_len=self.hparams.max_len,
                                                         pad_token=self.tgt_pad_token_i,
                                                         bos_token=self.tgt_bos_token_i,
                                                         eos_token=self.tgt_eos_token_i)
         elif self.hparams.generation == "beam_search":
-            self.generator = TranslationInferenceBeamSearch(self.model,
+            return TranslationInferenceBeamSearch(self.model,
                                                             beam_size=self.hparams.beam_size,
                                                             max_len=self.hparams.max_len,
                                                             pad_token=self.tgt_pad_token_i,
                                                             bos_token=self.tgt_bos_token_i,
                                                             eos_token=self.tgt_eos_token_i)
         elif self.hparams.generation == "nucleus":
-            self.generator = TranslationInferenceNucleusClassic(self.model,
+            return TranslationInferenceNucleusClassic(self.model,
                                                                 beam_size=self.hparams.beam_size,
                                                                 max_len=self.hparams.max_len,
                                                                 pad_token=self.tgt_pad_token_i,
@@ -92,7 +93,7 @@ class TranslationModel(LightningModule):
 
         elif self.hparams.generation == "greedy_speculative":
             assert self.hparams.n_speculative_tokens > 0, "Number of speculative tokens must be a positive integer."
-            self.generator = TranslationInferenceGreedySpeculative(
+            return TranslationInferenceGreedySpeculative(
                 self.model,
                 max_len=self.hparams.max_len,
                 n_speculative_tokens=self.hparams.n_speculative_tokens,
@@ -101,7 +102,7 @@ class TranslationModel(LightningModule):
                 eos_token=self.tgt_eos_token_i
             )
         elif self.hparams.generation == "beam_search_speculative":
-            self.generator = TranslationInferenceBeamSearchSpeculativeUnbatched(
+            return TranslationInferenceBeamSearchSpeculativeUnbatched(
                 self.model,
                 max_len=self.hparams.max_len,
                 n_best=self.hparams.n_best,
