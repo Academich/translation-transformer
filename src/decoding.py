@@ -26,24 +26,21 @@ class TranslationInferenceGreedy:
 
     def generate(self, src: 'torch.LongTensor') -> 'torch.LongTensor':
         b_size = src.size()[0]
-        generated_tokens = torch.full((b_size, 1), self.pad_token)
+        generated_tokens = torch.full((b_size, self.max_len), self.pad_token).type_as(src)
         generated_tokens[:, 0] = self.bos_token
-        generated_tokens = generated_tokens.type_as(src).long()
 
         src_pad_mask = (src == self.model.src_pad_token_i).bool()
         memory = self.model.encode_src(src, src_pad_mask)
 
-        for _ in range(self.max_len):
-            pred_logits = self.model.decode_tgt(generated_tokens, memory, memory_pad_mask=src_pad_mask)
+        for i in range(1, self.max_len):
+            pred_logits = self.model.decode_tgt(generated_tokens[:, :i], memory, memory_pad_mask=src_pad_mask)
             pred_token = self.sample(pred_logits)
-            generated_tokens = torch.cat(
-                (generated_tokens,
-                 pred_token),
-                dim=1
-            )
+            generated_tokens[:, i] = pred_token.squeeze(-1)
+            
             if (torch.logical_or(pred_token == self.eos_token,
                                  pred_token == self.pad_token)).sum().item() == b_size:
                 break
+        
         return torch.cat([i.unsqueeze(0) for i in generated_tokens.unsqueeze(1)], dim=0)
 
 
