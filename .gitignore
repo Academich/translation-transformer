@@ -133,3 +133,13 @@ dmypy.json
 
 # Lightning
 lightning_logs
+
+# Ignore everything in data folder
+data/*
+
+# But keep files directly in the data folder
+!data/*.*
+
+results/
+product_prediction/
+product_results_greedy/
