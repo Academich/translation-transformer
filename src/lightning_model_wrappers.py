@@ -97,6 +97,7 @@ class TranslationModel(LightningModule):
                 self.model,
                 max_len=self.hparams.max_len,
                 n_speculative_tokens=self.hparams.n_speculative_tokens,
+                max_drafts_num=5, # TODO remove hardcode
                 pad_token=self.tgt_pad_token_i,
                 bos_token=self.tgt_bos_token_i,
                 eos_token=self.tgt_eos_token_i

@@ -458,6 +458,7 @@ class TranslationInferenceGreedySpeculative:
                  model,  # TranslationModel
                  max_len: int,
                  n_speculative_tokens: int,
+                 max_drafts_num: int,
                  pad_token: int,
                  bos_token: int,
                  eos_token: int) -> None:
@@ -468,6 +469,7 @@ class TranslationInferenceGreedySpeculative:
         self.eos_token = eos_token
 
         self.n_speculative_tokens = n_speculative_tokens
+        self.max_drafts_num = max_drafts_num
         self.left_pad_token = -1
 
     def __str__(self):
@@ -476,6 +478,26 @@ class TranslationInferenceGreedySpeculative:
     def get_drafts(self, s: torch.Tensor) -> torch.Tensor:
         _, length = s.size()
         return s.unfold(-1, min(self.n_speculative_tokens, length - 1), 1)
+    
+    # def get_drafts(self, s: torch.Tensor) -> torch.Tensor:
+    #     b_size, length = s.size()
+
+    #     # Ensure we don't try to create more drafts than possible
+    #     max_possible_drafts = length - self.n_speculative_tokens + 1
+    #     n_drafts = min(self.max_drafts_num, max_possible_drafts)
+
+    #     if n_drafts <= 1:
+    #         return s[:, :self.n_speculative_tokens].unsqueeze(1)
+
+    #     # Generate start indices for each draft
+    #     start_indices = torch.linspace(0, length - self.n_speculative_tokens, n_drafts, device=s.device).long()
+    #     indices = start_indices.unsqueeze(1) + torch.arange(self.n_speculative_tokens, device=s.device).unsqueeze(0)
+    #     indices = indices.unsqueeze(0).expand(b_size, -1, -1)
+
+    #     # Use gather to create drafts
+    #     drafts = torch.gather(s.unsqueeze(1).expand(-1, n_drafts, -1), 2, indices)
+
+    #     return drafts  # Shape: (batch_size, n_drafts, n_speculative_tokens)
 
     def generate(self, src: 'torch.LongTensor') -> 'torch.LongTensor':
         b_size, src_len = src.size()
