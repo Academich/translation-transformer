@@ -1,4 +1,5 @@
 import torch
+
 from torch.nn.utils.rnn import pad_sequence
 
 
@@ -78,6 +79,10 @@ class TranslationInferenceBeamSearchSpeculativeUnbatched:
         self.max_num_positions_for_sampling = 1 * n_best
         self.log_prob_pad = 1
         self.log_prob_extra_pad = 2
+
+        self.given_tokens = 0
+        self.accepted_tokens_num = 0
+        self.model_calls_num = 0
 
     def __str__(self):
         return f"BeamSearchSpeculativeUnbatched decoding (n_best={self.n_best}, draftlen={self.n_speculative_tokens}, max_len={self.max_len})"
@@ -180,6 +185,7 @@ class TranslationInferenceBeamSearchSpeculativeUnbatched:
         b_size, src_len = src.size()
 
         src_pad_mask = (src == self.model.src_pad_token_i).bool()
+        self.given_tokens += (b_size * src_len - src_pad_mask.sum().item())
         memory = self.model.encode_src(src, src_pad_mask)
 
         src_unbatched = src.unsqueeze(1)  # -> (b_size, 1, src_len)
@@ -220,6 +226,7 @@ class TranslationInferenceBeamSearchSpeculativeUnbatched:
                                                     memory_pad_mask=memory_pad_mask_i.repeat(n_candidates, 1),
                                                     pos_enc_offset=pos_enc_offset)
                 #  -> (n_candidates * n_drafts, curr_len + draft_len, vocab_size)
+                self.model_calls_num += 1
                 vocab_size = pred_logits.shape[-1]
                 ###### Choosing the best draft for each candidate. The draft with the biggest number of
                 # approved tokens is the best draft for the given candidate. #########################################
@@ -242,6 +249,8 @@ class TranslationInferenceBeamSearchSpeculativeUnbatched:
                 # for each candidate
                 n_accepted, draft_i = n_accepted_in_drafts.topk(1, dim=-1)
                 # (n_candidates, n_drafts) -> (n_candidates, 1)
+                self.accepted_tokens_num += n_accepted.sum().item()
+
                 chosen_drafts = torch.gather(draft_tokens, dim=1,
                                              index=draft_i.unsqueeze(-1).expand(n_candidates, 1, draft_len)).squeeze(1)
                 #   -> (n_candidates, draft_len)
@@ -474,6 +483,10 @@ class TranslationInferenceGreedySpeculative:
         self.max_drafts_num = max_drafts_num
         self.left_pad_token = -1
 
+        self.accepted_tokens_num = 0
+        self.given_tokens = 0
+        self.model_calls_num = 0
+
     def __str__(self):
         return f"Greedy speculative decoding (n_speculative_tokens={self.n_speculative_tokens}, max_len={self.max_len})"
 
@@ -505,6 +518,7 @@ class TranslationInferenceGreedySpeculative:
         b_size, src_len = src.size()
 
         src_pad_mask = (src == self.model.src_pad_token_i).bool()
+        self.given_tokens += (b_size * src_len - src_pad_mask.sum().item())
         memory = self.model.encode_src(src, src_pad_mask)
         emb_dim = memory.size(2)
 
@@ -538,6 +552,8 @@ class TranslationInferenceGreedySpeculative:
                                                 memory_inflated,
                                                 memory_pad_mask=src_pad_mask_inflated,
                                                 pos_enc_offset=pos_enc_offset)
+            self.model_calls_num += 1
+
             pred_tokens = torch.argmax(pred_logits, dim=2)
 
             # Select and keep the draft with the largest number of accepted tokens
@@ -550,6 +566,7 @@ class TranslationInferenceGreedySpeculative:
             n_accepted_in_drafts = n_accepted_in_drafts.topk(1, -1)
             draft_i = n_accepted_in_drafts.indices
             n_accepted = n_accepted_in_drafts.values
+            self.accepted_tokens_num += n_accepted.sum().item()
             pred_tokens = pred_tokens.reshape(b_size, n_drafts, -1)
 
             chosen = torch.gather(pred_tokens, 1,
@@ -618,6 +635,7 @@ class TranslationInferenceGreedySpeculativeUnbatched:
         self.eos_token = eos_token
 
         self.n_speculative_tokens = n_speculative_tokens
+        self.accepted_tokens_num = 0
 
     def __str__(self):
         return f"Greedy speculative decoding unbatched (n_speculative_tokens={self.n_speculative_tokens}, max_len={self.max_len})"
@@ -1056,6 +1074,9 @@ class TranslationInferenceNucleusClassic:
         self.nucleus = 0.995
         assert self.max_len > 1
 
+        self.model_calls_num = 0
+        self.given_tokens = 0
+
     def sample(self, next_token_pred_logits, current_lines, current_log_probs):
         """
         """
@@ -1122,6 +1143,9 @@ class TranslationInferenceNucleusClassic:
 
         # Decode for one step using decoder
         decoder_output = self.model(src, y)  # -> (bs, 1, dict_len)
+        self.model_calls_num += 1
+        self.given_tokens += (src != self.pad_token).bool().sum().item()
+
         logprob_decoder_output = torch.log(torch.softmax(decoder_output, dim=-1))
 
         # check shape of the prediction
@@ -1138,6 +1162,8 @@ class TranslationInferenceNucleusClassic:
             # -> (b_s * n_candidates, length)
             next_logits = self.model(src_bw, curr_lines.reshape(-1, curr_len))[:, -1, :]
             #   -> (bs * n_candidates, vocab_size)
+            self.model_calls_num += 1
+
             curr_lines, current_log_probs = self.sample(next_logits.reshape(bs, n_candidates, -1), curr_lines,
                                                         current_log_probs)
             # -> (bs=1, 1 <= n_candidates <= beam_width, curr_len+1), (bs=1, n_candidates)

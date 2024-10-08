@@ -97,7 +97,7 @@ class TranslationModel(LightningModule):
                 self.model,
                 max_len=self.hparams.max_len,
                 n_speculative_tokens=self.hparams.n_speculative_tokens,
-                max_drafts_num=5, # TODO remove hardcode
+                max_drafts_num=5,  # TODO remove hardcode
                 pad_token=self.tgt_pad_token_i,
                 bos_token=self.tgt_bos_token_i,
                 eos_token=self.tgt_eos_token_i
@@ -199,6 +199,10 @@ class TranslationModel(LightningModule):
             self.prediction_start_time = timer()
 
     def on_predict_end(self) -> None:
+        print("Number of model calls:", self.generator.model_calls_num)
+        print("Number of non-pad tokens:", self.generator.given_tokens)
+        if self.hparams.generation == "greedy_speculative" or self.hparams.generation == "beam_search_speculative":
+            print("acceptance_rate:", self.generator.accepted_tokens_num / self.generator.given_tokens)
         if self.report_prediction_time:
             elapsed = datetime.timedelta(seconds=timer() - self.prediction_start_time)
             print(f"Predict time elapsed: {elapsed}; total seconds: {elapsed.total_seconds()}")

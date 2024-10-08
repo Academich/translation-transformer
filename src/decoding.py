@@ -18,6 +18,9 @@ class TranslationInferenceGreedy:
         self.bos_token = bos_token
         self.eos_token = eos_token
 
+        self.model_calls_num = 0
+        self.given_tokens = 0
+
     def __str__(self):
         return f"Greedy decoding (max_len={self.max_len})"
 
@@ -30,10 +33,12 @@ class TranslationInferenceGreedy:
         generated_tokens[:, 0] = self.bos_token
 
         src_pad_mask = (src == self.model.src_pad_token_i).bool()
+        self.given_tokens += (b_size * src.shape[1] - src_pad_mask.sum().item())
         memory = self.model.encode_src(src, src_pad_mask)
 
         for i in range(1, self.max_len):
             pred_logits = self.model.decode_tgt(generated_tokens[:, :i], memory, memory_pad_mask=src_pad_mask)
+            self.model_calls_num += 1
             pred_token = self.sample(pred_logits)
             generated_tokens[:, i] = pred_token.squeeze(-1)
             
@@ -66,17 +71,22 @@ class TranslationInferenceBeamSearch:
 
         assert self.max_len > 1
 
+        self.model_calls_num = 0
+        self.given_tokens = 0
+
     def __str__(self):
         return f"Beam search decoding (beam_size={self.beam_size}, max_len={self.max_len})"
 
     def generate(self, src: 'torch.LongTensor') -> 'torch.LongTensor':
-        bs, _ = src.size()
+        bs, src_len = src.size()
 
         # Prepare first tokens for decoder (bs, max_len)
         y = torch.tensor([self.bos_token]).repeat(bs, 1).long().type_as(src)  # (bs,1)
 
         # Decode for one step using decoder
         decoder_output = self.model(src, y)  # (bs, 1, dict_len)
+        self.model_calls_num += 1
+        self.given_tokens += (src != self.model.src_pad_token_i).bool().sum().item()
         logprob_decoder_output = torch.log(torch.softmax(decoder_output, dim=-1))
 
         # check shape of the prediction
@@ -100,7 +110,7 @@ class TranslationInferenceBeamSearch:
         for i in range(predictions - 1):
             next_probabilities = torch.log(torch.softmax(self.model(src_bw, y), dim=-1))[:, -1,
                                  :]  # (bs*b_w, vocab_size)
-
+            self.model_calls_num += 1
             next_probabilities = next_probabilities.reshape(
                 (-1, self.beam_size, next_probabilities.shape[-1]))  # (examples, b_w, vocab_size)
 
