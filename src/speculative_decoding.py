@@ -67,10 +67,10 @@ class TranslationInferenceBeamSearchSpeculativeUnbatched:
         self.eos_token = eos_token
         self.draft_mode = draft_mode
         if self.draft_mode:
-            self.draft_len = n_speculative_tokens
+            self.n_speculative_tokens = n_speculative_tokens
             self.max_drafts_num = max_num_of_drafts
         else:
-            self.draft_len = 1
+            self.n_speculative_tokens = 1
             self.max_drafts_num = 1
         self.nucleus_for_sampling = nucleus
         self.n_best = n_best
@@ -80,7 +80,7 @@ class TranslationInferenceBeamSearchSpeculativeUnbatched:
         self.log_prob_extra_pad = 2
 
     def __str__(self):
-        return f"BeamSearchSpeculativeUnbatched decoding (n_best={self.n_best}, draftlen={self.draft_len}, max_len={self.max_len})"
+        return f"BeamSearchSpeculativeUnbatched decoding (n_best={self.n_best}, draftlen={self.n_speculative_tokens}, max_len={self.max_len})"
 
     def sample(self, curr_lines, curr_log_probs_history, pred_logits, chosen_drafts, n_accepted=None):
         """
@@ -99,7 +99,7 @@ class TranslationInferenceBeamSearchSpeculativeUnbatched:
         """
 
         n_candidates, draft_len_plus_one, vocab_size = pred_logits.size()
-        assert draft_len_plus_one - 1 == self.draft_len
+        draft_len = draft_len_plus_one - 1
         masked_logits = mask_with_num_logits_according_nucleus(pred_logits, nucleus=self.nucleus_for_sampling,
                                                                max_num_of_unmasked_positions=self.max_num_positions_for_sampling,
                                                                num=0.)
@@ -111,7 +111,7 @@ class TranslationInferenceBeamSearchSpeculativeUnbatched:
             n_accepted = self.calculate_n_accepted_in_drafts(chosen_drafts.unsqueeze(1),
                                                              masked_logits.unsqueeze(1)).squeeze(-1)
         else:
-            not_fully_accepted_inds_bool = n_accepted != self.draft_len
+            not_fully_accepted_inds_bool = n_accepted != draft_len
             if not_fully_accepted_inds_bool.sum().item() != 0:
                 chosen_drafts[not_fully_accepted_inds_bool] = \
                     chosen_drafts[not_fully_accepted_inds_bool].scatter_(
@@ -182,7 +182,7 @@ class TranslationInferenceBeamSearchSpeculativeUnbatched:
         src_pad_mask = (src == self.model.src_pad_token_i).bool()
         memory = self.model.encode_src(src, src_pad_mask)
 
-        src_unbatched = src.unsqueeze(1)
+        src_unbatched = src.unsqueeze(1)  # -> (b_size, 1, src_len)
         src_pad_mask_unbatched = src_pad_mask.unsqueeze(1)
         memory_unbatched = memory.unsqueeze(1)
 
@@ -190,10 +190,10 @@ class TranslationInferenceBeamSearchSpeculativeUnbatched:
 
         for i in range(b_size):
             drafts = self.get_drafts(src_unbatched[i], self.draft_mode)
-            # -> (self.max_drafts_num, self.draft_len)
+            # -> (self.max_drafts_num, min(self.n_speculative_tokens, non_pad_length - 1))
 
             n_drafts, draft_len = drafts.size()
-            assert draft_len == self.draft_len
+
             iters = 0
 
             generated_tokens = torch.full((1, 1), self.bos_token).type_as(src).long()
@@ -204,7 +204,7 @@ class TranslationInferenceBeamSearchSpeculativeUnbatched:
             finished_candidates_t = None
 
             log_probs_history = torch.full((1, 1), 0.).type_as(src).float()
-            while (generated_tokens.size(1) + self.draft_len + 1) < self.max_len and iters < self.max_len:
+            while (generated_tokens.size(1) + draft_len + 1) < self.max_len and iters < self.max_len:
                 iters += 1
                 n_candidates, curr_len = generated_tokens.size()
                 draft_tokens = drafts.repeat(n_candidates, 1)  # -> (n_candidates * n_drafts, draft_len)
@@ -395,13 +395,15 @@ class TranslationInferenceBeamSearchSpeculativeUnbatched:
         return candidates[sorted_inds], candidates_log_probs_history[sorted_inds]
 
     def get_drafts(self, src_unbatched: 'torch.LongTensor', draft_mode: bool):
+        # src_unbatched: 'torch.LongTensor' of shape (1, src_len)
         if draft_mode:
             src_unbatched_i = src_unbatched[:, 1:]
             src_unbatched_i_pads = (src_unbatched_i == self.pad_token).int().sum(-1)
             n_tokens_without_pads = src_unbatched_i.size(1) - src_unbatched_i_pads
             src_unbatched_i_unpadded = src_unbatched_i[:, :n_tokens_without_pads]
-            drafts = src_unbatched_i_unpadded.unfold(-1, self.draft_len, 1).squeeze(0)[:self.max_drafts_num, :]
-            # -> (n_drafts, draft_len)
+            drafts = src_unbatched_i_unpadded.unfold(-1, min(self.n_speculative_tokens, src_unbatched_i_unpadded.shape[1] - 1),
+                                                     1).squeeze(0)[:self.max_drafts_num, :]
+            # -> (n_drafts, draft_len = min(self.draft_len, unpadded_src_len - 1))
         else:
             drafts = src_unbatched[:, 0].unsqueeze(0).expand(self.max_drafts_num, 1)  # just [bos]
             # -> (n_drafts, draft_len=1)
