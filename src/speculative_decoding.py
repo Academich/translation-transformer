@@ -25,14 +25,14 @@ def move_pads_to_the_left(arr: torch.Tensor, pad_token: int = 0) -> torch.Tensor
     return torch.gather(arr, dim=1, index=indices)
 
 
-def trim_left_pads(tensor_t, pad_id: int):
+def trim_left_pads(tensor_t, left_pad_id: int):
     """
     Remove columns from the left that contain only PAD tokens.
     tensor_t is supposed to have PAD tokens only on the left
     """
     rows_num, _ = tensor_t.size()
     # number of left columns filled with the pad id
-    padded_columns_num = ((tensor_t == pad_id).sum(0) == rows_num).sum()
+    padded_columns_num = ((tensor_t == left_pad_id).sum(0) == rows_num).sum()
     return tensor_t[:, padded_columns_num:]
 
 
@@ -515,98 +515,120 @@ class TranslationInferenceGreedySpeculative:
     #     return drafts  # Shape: (batch_size, n_drafts, n_speculative_tokens)
 
     def generate(self, src: 'torch.LongTensor') -> 'torch.LongTensor':
-        b_size, src_len = src.size()
+        src_b_size, src_len = src.size()
 
         src_pad_mask = (src == self.model.src_pad_token_i).bool()
-        self.given_tokens += (b_size * src_len - src_pad_mask.sum().item())
-        memory = self.model.encode_src(src, src_pad_mask)
+        self.given_tokens += (src_b_size * src_len - src_pad_mask.sum().item())
+        memory = self.model.encode_src(src, src_pad_mask)  # -> (given_b_size, src_len, emb_dim)
         emb_dim = memory.size(2)
 
-        generated_tokens = torch.full((b_size, 1), self.bos_token).type_as(src).long()
-        draft_tokens = self.get_drafts(src[:, 1:])  # Not including bos_token in drafts
+        generated_tokens = torch.full((src_b_size, 1), self.bos_token).type_as(src).long()
+        draft_tokens = self.get_drafts(src[:, 1:])  # Not including bos_token in drafts.
+        # -> (given_b_size, n_drafts, n_spec_tok)
         _, n_drafts, n_spec_tok = draft_tokens.size()
+        # (given_b_size, n_drafts, n_spec_tok = min(self.n_speculative_tokens, src_len - 2))
+
         iters = 0
-        finished_predictions = torch.full((b_size, self.max_len), self.pad_token).type_as(src)
-        batch_indices = torch.arange(b_size).type_as(src)
-        while generated_tokens.size(1) < self.max_len:
+        finished_predictions = torch.full((src_b_size, self.max_len), self.pad_token).type_as(src)
+        batch_indices_of_unfinished_seqs = torch.arange(src_b_size).type_as(src)
+        while generated_tokens.size(1) < self.max_len:  # while gnrtd_len < self.max_len
             iters += 1
-            b_size = batch_indices.size(0)
+            b_size = batch_indices_of_unfinished_seqs.size(0)  # this is the current b_size.
+            # It can be less than the original src_b_size because some prediction seqs can be already finished
 
             # Attach every draft to every sequence decoded so far
-            draft_sequence = torch.cat([generated_tokens.unsqueeze(1).repeat(1, n_drafts, 1), draft_tokens],
+            drafted_seqs = torch.cat([generated_tokens.unsqueeze(1).repeat(1, n_drafts, 1), draft_tokens],
                                        dim=-1).reshape(b_size * n_drafts, -1)
+            # [generated_tokens: (b_size, gnrtd_len)] -unsqz-> (b_size, 1, gnrtd_len)
+            # -rpt-> (b_size, n_drafts, gnrtd_len)
+            # -cat wth (b_size, n_drafts, n_spec_tok)-> (b_size, n_drafts, gnrtd_len + n_spec_tok)
+            # -rshp-> (b_size * n_drafts, gnrtd_len + n_spec_tok)
 
             # Handle the different length of every sequence
-            pos_enc_offset = (draft_sequence == self.left_pad_token).int().sum(-1).view(-1, 1)
+            pos_enc_offset = (drafted_seqs == self.left_pad_token).int().sum(-1).view(-1, 1)
             generated_tokens = generated_tokens.masked_fill(generated_tokens == self.left_pad_token, self.pad_token)
-            draft_sequence = draft_sequence.masked_fill(draft_sequence == self.left_pad_token, self.pad_token)
+            drafted_seqs = drafted_seqs.masked_fill(drafted_seqs == self.left_pad_token, self.pad_token)
+            # (b_size * n_drafts, gnrtd_len + n_spec_tok)
 
             # Copy memory and memory mask along the batch dimension to match the new effective batch size
-            memory_inflated = memory.unsqueeze(1).repeat(1, n_drafts, 1, 1)
+            memory_inflated = memory.unsqueeze(1).repeat(1, n_drafts, 1, 1)  # (b_size, src_len, emb_dim) ->
+            # -> (b_size, 1, src_len, emb_dim) -> (b_size, n_drafts, src_len, emb_dim)
+
             memory_inflated = memory_inflated.view(b_size * n_drafts, -1, emb_dim)
+            # -> (b_size * n_drafts, src_len, emb_dim)
+
             src_pad_mask_inflated = src_pad_mask.unsqueeze(1).repeat(1, n_drafts, 1)
             src_pad_mask_inflated = src_pad_mask_inflated.view(b_size * n_drafts, -1)
 
             # Run the decoder and sample from the predicted distributions
-            pred_logits = self.model.decode_tgt(draft_sequence,
+            pred_logits = self.model.decode_tgt(drafted_seqs,
                                                 memory_inflated,
                                                 memory_pad_mask=src_pad_mask_inflated,
                                                 pos_enc_offset=pos_enc_offset)
+            # -> (b_size * n_drafts, gnrtd_len + n_spec_tok, vocab_sz)
             self.model_calls_num += 1
 
-            pred_tokens = torch.argmax(pred_logits, dim=2)
+            pred_tokens = torch.argmax(pred_logits, dim=2)  # -> (b_size * n_drafts, gnrtd_len + n_spec_tok)
 
             # Select and keep the draft with the largest number of accepted tokens
-            pred_tokens = pred_tokens[:, -(n_spec_tok + 1):]
-            verification = draft_tokens.reshape(b_size * n_drafts, -1) == pred_tokens[:, :-1]
-            _range = verification.cumsum(-1)
+            pred_tokens = pred_tokens[:, -(n_spec_tok + 1):]  # -> (b_size * n_drafts, n_spec_tok + 1)
+            verification = draft_tokens.reshape(b_size * n_drafts, n_spec_tok) == pred_tokens[:, :-1]
+            # -> (b_size * n_drafts, n_spec_tok)
+
+            _range = verification.cumsum(-1)  # -> (b_size * n_drafts, n_spec_tok)
             accepted_in_drafts = (torch.arange(1, verification.size(1) + 1).type_as(_range) == _range)
-            n_accepted_in_drafts = accepted_in_drafts.sum(-1)
-            n_accepted_in_drafts = n_accepted_in_drafts.reshape(b_size, n_drafts)
+            # -> (b_size * n_drafts, n_spec_tok)
+
+            n_accepted_in_drafts = accepted_in_drafts.sum(-1)  # -> (b_size * n_drafts)
+            n_accepted_in_drafts = n_accepted_in_drafts.reshape(b_size, n_drafts)  # -> (b_size, n_drafts)
             n_accepted_in_drafts = n_accepted_in_drafts.topk(1, -1)
-            draft_i = n_accepted_in_drafts.indices
-            n_accepted = n_accepted_in_drafts.values
-            self.accepted_tokens_num += n_accepted.sum().item()
-            pred_tokens = pred_tokens.reshape(b_size, n_drafts, -1)
+            draft_i = n_accepted_in_drafts.indices  # -> (b_size, 1)
+            n_accepted = n_accepted_in_drafts.values  # -> (b_size, 1)
+            self.accepted_tokens_num += n_accepted.sum().item()  # int
+            pred_tokens = pred_tokens.reshape(b_size, n_drafts, -1)  # -> (b_size, n_drafts, n_spec_tok + 1)
 
             chosen = torch.gather(pred_tokens, 1,
-                                  draft_i.unsqueeze(-1).expand(b_size, 1, pred_tokens.size(-1))).squeeze(1)
-            pred_tokens = chosen.masked_fill(torch.arange(pred_tokens.size(-1)).type_as(n_accepted) > n_accepted,
-                                             self.left_pad_token)
+                                  draft_i.unsqueeze(-1).expand(b_size, 1, n_spec_tok + 1)).squeeze(1)
+            # -> (b_size, n_spec_tok + 1)
+
+            pred_tokens = chosen.masked_fill(torch.arange(n_spec_tok + 1).type_as(n_accepted) > n_accepted,
+                                             self.left_pad_token)  # -> (b_sz, n_spec_tok + 1)
 
             generated_tokens = torch.cat(
                 (generated_tokens,
                  pred_tokens),
                 dim=1
-            )
+            )  # ((b_size, gnrtd_len) , (b_size, n_spec_tok + 1)) -cat-> (b_size, gnrtd_len + n_spec_tok + 1)
 
-            current_finished_mask = (generated_tokens == self.eos_token).sum(-1).bool()  # (<=b_sz)
-            current_finished_ids = current_finished_mask.nonzero().ravel()
-            if current_finished_ids.nelement() > 0:
-                current_continuing_mask = ~current_finished_mask
-                batch_finished_indices = batch_indices[current_finished_mask]
+            current_finished_mask = (generated_tokens == self.eos_token).sum(-1).bool()  # -> (b_size)
+            ids_of_current_finished_seqs = current_finished_mask.nonzero().ravel()
+            if ids_of_current_finished_seqs.nelement() > 0:
+                current_continuing_mask = ~current_finished_mask  # (b_size)
+                batch_finished_indices = batch_indices_of_unfinished_seqs[current_finished_mask]
 
-                current_finished_tokens = generated_tokens[current_finished_ids]
-                current_finished_tokens = move_pads_to_the_right(current_finished_tokens, self.pad_token)
-                current_finished_tokens = current_finished_tokens.masked_fill(
-                    current_finished_tokens == self.left_pad_token,
+                current_finished_seqs = generated_tokens[ids_of_current_finished_seqs]
+                current_finished_seqs = move_pads_to_the_right(current_finished_seqs, self.pad_token)
+                current_finished_seqs = current_finished_seqs.masked_fill(
+                    current_finished_seqs == self.left_pad_token,
                     self.pad_token)
-                current_finished_tokens = trim_right_pads(current_finished_tokens, self.pad_token)
+                current_finished_seqs = trim_right_pads(current_finished_seqs, self.pad_token)
 
-                finished_predictions[batch_finished_indices, :current_finished_tokens.size(1)] = current_finished_tokens
+                finished_predictions[batch_finished_indices, :current_finished_seqs.size(1)] = current_finished_seqs
 
-                batch_indices = batch_indices[current_continuing_mask]
+                batch_indices_of_unfinished_seqs = batch_indices_of_unfinished_seqs[current_continuing_mask]
 
                 generated_tokens = generated_tokens[current_continuing_mask]
                 draft_tokens = draft_tokens[current_continuing_mask]
                 memory = memory[current_continuing_mask]
                 src_pad_mask = src_pad_mask[current_continuing_mask]
-            if batch_indices.nelement() == 0:
+            if batch_indices_of_unfinished_seqs.nelement() == 0:
                 break
 
             generated_tokens = move_pads_to_the_left(generated_tokens, self.left_pad_token)
+            # -> (b_size, gnrtd_len + n_spec_tok + 1)
             generated_tokens = generated_tokens.masked_fill(generated_tokens == self.pad_token, self.left_pad_token)
             generated_tokens = trim_left_pads(generated_tokens, self.left_pad_token)
+            # -> (b_size, gnrtd_len + 1 <= new gnrtd_len <= gnrtd_len + n_spec_tok + 1)
 
         return finished_predictions.unsqueeze(1)
 
