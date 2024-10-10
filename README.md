@@ -14,7 +14,7 @@ can be accelerated by ~3 times on inference without losing accuracy.
 
 Create a new isolated environment with Python 3.10 and install the necessary packages:
 
-```
+```bash
 pip install lightning
 pip install jsonargparse[signatures]
 pip install rdkit
@@ -28,16 +28,26 @@ pip install -e .
 For reaction prediction, we used USPTO_MIT mixed from the [Molecular Transformer](https://github.com/pschwllr/MolecularTransformer.git) paper.
 For single-step retrosynthesis, we used USPTO50k as prepared in the [RSMILES](https://github.com/otori-bird/retrosynthesis) paper.
 
-Download USPTO MIT mixed:
-```commandline
+**Download USPTO MIT mixed:**
+```bash
 gdown https://drive.google.com/drive/folders/1fJ7Hm55IDevIi5Apna7v-rQBQStTH7Yg -O data/MIT_mixed --folder
 cd data/MIT_mixed
 python3 detokenize.py
 ```
 
-Download USPTO50K:
-```commandline
-gdown https://drive.google.com/drive/folders/1la4OgBKgm2K-IRwuV-GHUNjN3bcCrl6v -O data/USPTO50K --folder
+**Download USPTO 50K** and augment it using [RSMILES](https://github.com/otori-bird/retrosynthesis) augmentation.  
+Clone the RSMILES repository to some path in your system.
+```bash
+pip install textdistance
+
+THIS_REPO_PATH=$(pwd) # The full path to this repository 
+RSMILES_PATH=../retrosynthesis  # as an example; the path to the RSMILES repository
+
+gdown https://drive.google.com/drive/folders/1la4OgBKgm2K-IRwuV-GHUNjN3bcCrl6v -O ${RSMILES_PATH}/dataset/USPTO_50K --folder
+cd ${RSMILES_PATH}
+AUGMENTATIONS=20
+python3 preprocessing/generate_PtoR_data.py -augmentation ${AUGMENTATIONS} -processes 8 
+mv dataset/USPTO_50K_PtoR_aug${AUGMENTATIONS} ${THIS_REPO_PATH}/data # The augmented dataset is now in this repository
 ```
 
 ### Models
@@ -50,13 +60,13 @@ The directory `scripts` contains bash scripts for reaction product prediction an
 
 Trained checkpoints and config files are available at [Google Drive](https://drive.google.com/drive/folders/1uF_wGEUTCz4_xI1uEEeY0V_1QffkOyXI?usp=sharing).
 Download reaction prediction checkpoints:
-```commandline
+```bash
 mkdir checkpoints
 mkdir checkpoints/reaction_prediction
 gdown https://drive.google.com/drive/folders/1sBiVgFZyD4F42nVqR835-0Tl90LkQvU9 -O checkpoints/reaction_prediction --folder
 ```
 Download single-step retrosynthesis checkpoints
-```commandline
+```bash
 mkdir checkpoints/single_step_retrosynthesis
 gdown https://drive.google.com/drive/folders/1v4pKYWlE0qNA-ksa7yX55i7qMeesURON -O checkpoints/single_step_retrosynthesis --folder
 ```
