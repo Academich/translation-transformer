@@ -39,8 +39,16 @@ class Seq2SeqDataset(Dataset):
 
 class Seq2SeqDM(LightningDataModule):
     def __init__(self,
-                 data_dir: str | None = None,
-                 batch_size: int = 1,
+                 data_dir: str | None = None,  # Data location arguments
+                 src_train_path: str | None = None,
+                 tgt_train_path: str | None = None,
+                 src_val_path: str | None = None,
+                 tgt_val_path: str | None = None,
+                 src_test_path: str | None = None,
+                 tgt_test_path: str | None = None,
+                 vocab_path: str | None = None,
+
+                 batch_size: int = 1,  # Batching arguments
                  tokens_in_batch: int | None = None,
                  num_workers: int = 0,
                  persistent_workers=False,
@@ -49,12 +57,13 @@ class Seq2SeqDM(LightningDataModule):
         super().__init__()
 
         self.data_dir = Path(data_dir).resolve()
-        self.src_train_path = self.data_dir / "src-train.txt"
-        self.tgt_train_path = self.data_dir / "tgt-train.txt"
-        self.src_val_path = self.data_dir / "src-val.txt"
-        self.tgt_val_path = self.data_dir / "tgt-val.txt"
-        self.src_test_path = self.data_dir / "src-test.txt"
-        self.tgt_test_path = self.data_dir / "tgt-test.txt"
+        self.src_train_path = src_train_path or self.data_dir / "src-train.txt"
+        self.tgt_train_path = tgt_train_path or self.data_dir / "tgt-train.txt"
+        self.src_val_path = src_val_path or self.data_dir / "src-val.txt"
+        self.tgt_val_path = tgt_val_path or self.data_dir / "tgt-val.txt"
+        self.src_test_path = src_test_path or self.data_dir / "src-test.txt"
+        self.tgt_test_path = tgt_test_path or self.data_dir / "tgt-test.txt"
+        self.vocab_path = vocab_path
 
         self.batch_size = batch_size
         self.shuffle_train = shuffle_train
@@ -63,9 +72,9 @@ class Seq2SeqDM(LightningDataModule):
         self.pin_memory = pin_memory
         self.tokens_in_batch = tokens_in_batch
 
-        self.src_tokenizer, self.tgt_tokenizer = self.create_tokenizers()
+        self.src_tokenizer, self.tgt_tokenizer = self.create_tokenizers(self.vocab_path)
 
-    def create_tokenizers(self):
+    def create_tokenizers(self, vocab_path: str | None = None) -> tuple[GenericTokenizer, GenericTokenizer]:
         """
         Create tokenizers for a particular task and assign
         them to self.src_tokenizer and self.tgt_tokenizer
