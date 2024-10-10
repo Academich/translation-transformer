@@ -51,8 +51,13 @@ class PredictionWriter(BasePredictionWriter):
     ):
         tkz = pl_module.tgt_tokenizer
         with open(self.output_path, "a") as f:
+            if f.tell() == 0:
+                print(",".join(["source", "target", "prediction"]), file=f)
+            src = batch["src_tokens"].cpu().numpy()
             tgt = batch["tgt_tokens"].cpu().numpy()
-            for i, t in enumerate(tgt):
+            for i, (s, t) in enumerate(zip(src, tgt)):
+                s_string = tkz.decode(s)
                 t_string = tkz.decode(t)
-                p_options = tkz.decode_batch(prediction[i].cpu().numpy())
-                print(",".join([t_string] + p_options), file=f)
+                # p_options = tkz.decode_batch(prediction[i].cpu().numpy()) # TODO Use this
+                p_options = [tkz.decode(prediction[i].cpu().numpy())]
+                print(",".join([s_string, t_string] + p_options), file=f)
