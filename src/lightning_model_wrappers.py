@@ -11,8 +11,7 @@ from pytorch_lightning.utilities.types import STEP_OUTPUT
 
 from tokenization import GenericTokenizer
 from decoding import TranslationInferenceGreedy, TranslationInferenceBeamSearch
-from speculative_decoding import TranslationInferenceNucleusClassic, \
-    TranslationInferenceGreedySpeculative, TranslationInferenceBeamSearchSpeculativeUnbatched
+from speculative_decoding import TranslationInferenceGreedySpeculative, TranslationInferenceBeamSearchSpeculativeUnbatched
 from utils import NoamLRSchedule, ConstantLRSchedule, calc_token_acc, calc_sequence_acc
 
 
@@ -83,13 +82,6 @@ class TranslationModel(LightningModule):
                                                             pad_token=self.tgt_pad_token_i,
                                                             bos_token=self.tgt_bos_token_i,
                                                             eos_token=self.tgt_eos_token_i)
-        elif self.hparams.generation == "nucleus":
-            return TranslationInferenceNucleusClassic(self.model,
-                                                                beam_size=self.hparams.beam_size,
-                                                                max_len=self.hparams.max_len,
-                                                                pad_token=self.tgt_pad_token_i,
-                                                                bos_token=self.tgt_bos_token_i,
-                                                                eos_token=self.tgt_eos_token_i)
 
         elif self.hparams.generation == "greedy_speculative":
             assert self.hparams.n_speculative_tokens > 0, "Number of speculative tokens must be a positive integer."
@@ -117,7 +109,7 @@ class TranslationModel(LightningModule):
             )
 
         else:
-            options = ", ".join(["beam_search", "greedy", "nucleus", "greedy_speculative", "beam_search_speculative"])
+            options = ", ".join(["beam_search", "greedy", "greedy_speculative", "beam_search_speculative"])
             raise ValueError(
                 f'Unknown generation option {self.hparams.generation}. Options are {options}.')
 
