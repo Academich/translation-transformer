@@ -182,6 +182,12 @@ class TranslationInferenceBeamSearchSpeculativeUnbatched:
         return new_candidates, log_prob_history
 
     def generate(self, src: 'torch.LongTensor') -> list['torch.LongTensor']:
+        """
+        Generate a batch of sequences using speculative beam search decoding.
+        Input shape: B x L (batch size x source sequence length)
+        Output shape: B x N x L (batch size x number of hypotheses x target sequence length)
+        In speculative beam search decoding, N is equal to the top N best sequences generated.
+        """
         b_size, src_len = src.size()
 
         src_pad_mask = (src == self.model.src_pad_token_i).bool()

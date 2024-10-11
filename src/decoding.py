@@ -28,6 +28,12 @@ class TranslationInferenceGreedy:
         return torch.argmax(pred_logits, dim=2)[:, -1:]
 
     def generate(self, src: 'torch.LongTensor') -> 'torch.LongTensor':
+        """
+        Generate a batch of sequences using greedy decoding.
+        Input shape: B x L (batch size x source sequence length)
+        Output shape: B x N x L (batch size x number of hypotheses x target sequence length)
+        In greedy decoding, N is always 1.
+        """
         b_size = src.size()[0]
         generated_tokens = torch.full((b_size, self.max_len), self.pad_token).type_as(src)
         generated_tokens[:, 0] = self.bos_token
@@ -78,6 +84,12 @@ class TranslationInferenceBeamSearch:
         return f"Beam search decoding (beam_size={self.beam_size}, max_len={self.max_len})"
 
     def generate(self, src: 'torch.LongTensor') -> 'torch.LongTensor':
+        """
+        Generate a batch of sequences using beam search decoding.
+        Input shape: B x L (batch size x source sequence length)
+        Output shape: B x N x L (batch size x number of hypotheses x target sequence length)
+        In beam search decoding, N is equal to beam_size.
+        """
         bs, src_len = src.size()
 
         # Prepare first tokens for decoder (bs, max_len)
