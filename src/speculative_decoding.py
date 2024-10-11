@@ -357,7 +357,7 @@ class TranslationInferenceBeamSearchSpeculativeUnbatched:
                 finished_candidates_t = finished_candidates_t[:self.n_best]
                 finished_candidates_log_probs_t = finished_candidates_log_probs_t[:self.n_best]
                 result.append(finished_candidates_t)  # (n, max_len)
-            return result
+        return result
 
     def calculate_n_accepted_in_drafts(self, draft_tokens, masked_probs):
         """
