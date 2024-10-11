@@ -46,7 +46,7 @@ class TranslationInferenceGreedy:
                                  pred_token == self.pad_token)).sum().item() == b_size:
                 break
         
-        return torch.cat([i.unsqueeze(0) for i in generated_tokens.unsqueeze(1)], dim=0)
+        return generated_tokens.unsqueeze(1)
 
 
 class TranslationInferenceBeamSearch:
