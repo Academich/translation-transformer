@@ -1,7 +1,7 @@
 import torch
 
 from torch.nn.utils.rnn import pad_sequence
-
+from collections import defaultdict
 
 def move_pads_to_the_right(arr: torch.Tensor, pad_token: int = 0) -> torch.Tensor:
     """
@@ -83,6 +83,8 @@ class TranslationInferenceBeamSearchSpeculativeUnbatched:
         self.given_tokens = 0
         self.accepted_tokens_num = 0
         self.model_calls_num = 0
+
+        self.iter_to_draft_inds_to_accepted_tokens_num = defaultdict(lambda: defaultdict(int))
 
     def __str__(self):
         return f"BeamSearchSpeculativeUnbatched decoding (n_best={self.n_best}, draftlen={self.n_speculative_tokens}, max_len={self.max_len})"
@@ -201,8 +203,12 @@ class TranslationInferenceBeamSearchSpeculativeUnbatched:
         result = []
 
         for i in range(b_size):
-            drafts = self.get_drafts(src_unbatched[i], self.draft_mode)
-            # -> (self.max_drafts_num, min(self.n_speculative_tokens, non_pad_length - 1))
+            draft_mode = "linspace"
+            if draft_mode == "linspace":
+                drafts = self.get_drafts_linspace(src_unbatched[i])
+            else:
+                drafts = self.get_drafts(src_unbatched[i], self.draft_mode)
+            # -> (min(self.max_drafts_num, max_possible_drafts), min(self.n_speculative_tokens, non_pad_length - 1))
 
             n_drafts, draft_len = drafts.size()
 
@@ -256,6 +262,9 @@ class TranslationInferenceBeamSearchSpeculativeUnbatched:
                 n_accepted, draft_i = n_accepted_in_drafts.topk(1, dim=-1)
                 # (n_candidates, n_drafts) -> (n_candidates, 1)
                 self.accepted_tokens_num += n_accepted.sum().item()
+                for j in range(n_candidates):
+                    if n_accepted[j, 0].item() >= 2:
+                        self.iter_to_draft_inds_to_accepted_tokens_num[iters - 1][draft_i[j, 0].item()] += n_accepted[j, 0].item()
 
                 chosen_drafts = torch.gather(draft_tokens, dim=1,
                                              index=draft_i.unsqueeze(-1).expand(n_candidates, 1, draft_len)).squeeze(1)
@@ -273,19 +282,6 @@ class TranslationInferenceBeamSearchSpeculativeUnbatched:
                 new_candidates, new_log_probs_history = \
                     self.sample(generated_tokens, log_probs_history, pred_logits,
                                 chosen_drafts, n_accepted.squeeze(-1))
-                # generated_tokens: candidates lines from previous round (the old tokens),
-                #                   tensor of size (n_candidates, curr_len),
-                # log_probs_history: log probs of generated_tokens,
-                #                   tensor of size  (n_candidates, curr_len),
-                # pred_logits: logits of the chosen drafts` tokens,
-                #                   tensor of size  (n_candidates, draft_len + 1, vocab_size),
-                # chosen_drafts: the chosen drafts` tokens,
-                #                   tensor of size  (n_candidates, draft_len)
-                # n_accepted: number of approved tokens in each draft,
-                #                   tensor of size (n_candidates) or None (in this case it will be recalculated inside
-                #                   self.sample() according to self.nucleus_for_sampling parameter)
-                #   ->  new_candidates: tensor of size (num_lines, len),
-                #       new_log_probs_history: tensor of size (num_lines, len)
 
                 # We don't want to give the model lines with eos just to produce pads.
                 # So we store the best sequences with eos.
@@ -425,6 +421,34 @@ class TranslationInferenceBeamSearchSpeculativeUnbatched:
             # -> (n_drafts, draft_len=1)
         return drafts
 
+    def get_drafts_linspace(self, s: torch.Tensor) -> torch.Tensor:
+        b_sz, length = s.size()
+        # return s.unfold(-1, min(self.n_speculative_tokens, length - 1), 1)
+        drafts_len = min(self.n_speculative_tokens, length - 1)
+        start_inds = torch.zeros(b_sz).long()  # (b_sz)
+        end_inds = length - torch.cumsum(s == 0, dim=-1).bool().sum(-1) - 1  # (b_sz)
+
+        # Ensure we don't try to create more drafts than possible
+        max_possible_drafts = min(end_inds) - drafts_len + 1
+        n_drafts = min(self.max_drafts_num, max_possible_drafts)
+
+        if n_drafts <= 1:
+            return s[:, :drafts_len].unsqueeze(1)
+
+        base_range = torch.arange(n_drafts).unsqueeze(0).repeat(b_sz, 1)  # (b_sz, n_drafts)
+
+        const_multiplier = (end_inds - drafts_len - start_inds) / (torch.ones(b_sz) * n_drafts - 1)  # (b_sz)
+        start_inds_of_drafts = (
+                    start_inds.unsqueeze(-1) + const_multiplier.unsqueeze(-1) * base_range).long()  # (b_sz, n_drafts)
+
+        indices = start_inds_of_drafts.unsqueeze(-1) + torch.arange(drafts_len).unsqueeze(0).unsqueeze(
+            0)  # (b_sz, n_drafts, drafts_len)
+        indices = indices.to(s.device)
+        # Use gather to create drafts
+        drafts = torch.gather(s.unsqueeze(1).expand(-1, n_drafts, -1), 2, indices)  # (b_sz=1, n_drafts, drafts_len)
+
+        return drafts.squeeze(0)  # Shape: (n_drafts, drafts_len)
+
 
 def mask_with_num_logits_according_nucleus(pred_logits, nucleus, max_num_of_unmasked_positions, num=0.):
     """
@@ -501,25 +525,55 @@ class TranslationInferenceGreedySpeculative:
         _, length = s.size()
         return s.unfold(-1, min(self.n_speculative_tokens, length - 1), 1)
     
-    # def get_drafts(self, s: torch.Tensor) -> torch.Tensor:
-    #     b_size, length = s.size()
+    def get_drafts_linspace_ver0(self, s: torch.Tensor) -> torch.Tensor:
+        b_size, length = s.size()
 
-    #     # Ensure we don't try to create more drafts than possible
-    #     max_possible_drafts = length - self.n_speculative_tokens + 1
-    #     n_drafts = min(self.max_drafts_num, max_possible_drafts)
+        # Ensure we don't try to create more drafts than possible
+        max_possible_drafts = length - self.n_speculative_tokens + 1
+        n_drafts = min(self.max_drafts_num, max_possible_drafts)
 
-    #     if n_drafts <= 1:
-    #         return s[:, :self.n_speculative_tokens].unsqueeze(1)
+        if n_drafts <= 1:
+            return s[:, :self.n_speculative_tokens].unsqueeze(1)
 
-    #     # Generate start indices for each draft
-    #     start_indices = torch.linspace(0, length - self.n_speculative_tokens, n_drafts, device=s.device).long()
-    #     indices = start_indices.unsqueeze(1) + torch.arange(self.n_speculative_tokens, device=s.device).unsqueeze(0)
-    #     indices = indices.unsqueeze(0).expand(b_size, -1, -1)
+        # Generate start indices for each draft
+        start_indices = torch.linspace(0, length - self.n_speculative_tokens, n_drafts, device=s.device).long()
+        indices = start_indices.unsqueeze(1) + torch.arange(self.n_speculative_tokens, device=s.device).unsqueeze(0)
+        indices = indices.unsqueeze(0).expand(b_size, -1, -1)
 
-    #     # Use gather to create drafts
-    #     drafts = torch.gather(s.unsqueeze(1).expand(-1, n_drafts, -1), 2, indices)
+        # Use gather to create drafts
+        drafts = torch.gather(s.unsqueeze(1).expand(-1, n_drafts, -1), 2, indices)
 
-    #     return drafts  # Shape: (batch_size, n_drafts, n_speculative_tokens)
+        return drafts  # Shape: (batch_size, n_drafts, n_speculative_tokens)
+
+    def get_drafts_linspace(self, s: torch.Tensor) -> torch.Tensor:
+        b_sz, length = s.size()
+        # return s.unfold(-1, min(self.n_speculative_tokens, length - 1), 1)
+        drafts_len = min(self.n_speculative_tokens, length - 1)
+        start_inds = torch.zeros(b_sz).long()  # (b_sz)
+        end_inds = length - torch.cumsum(s == 0, dim=-1).bool().sum(-1) - 1  # (b_sz)
+
+        # Ensure we don't try to create more drafts than possible
+        max_possible_drafts = min(end_inds) - drafts_len + 1
+        n_drafts = min(self.max_drafts_num, max_possible_drafts)
+
+        if n_drafts <= 1:
+            return s[:, :drafts_len].unsqueeze(1)
+
+        base_range = torch.arange(n_drafts).unsqueeze(0).repeat(b_sz, 1)  # (b_sz, n_drafts)
+
+        const_multiplier = (end_inds - drafts_len - start_inds) / (torch.ones(b_sz) * n_drafts - 1)  # (b_sz)
+        start_inds_of_drafts = (
+                    start_inds.unsqueeze(-1) + const_multiplier.unsqueeze(-1) * base_range).long()  # (b_sz, n_drafts)
+
+        indices = start_inds_of_drafts.unsqueeze(-1) + torch.arange(drafts_len).unsqueeze(0).unsqueeze(
+            0)  # (b_sz, n_drafts, drafts_len)
+
+        indices = indices.to(s.device)
+
+        # Use gather to create drafts
+        drafts = torch.gather(s.unsqueeze(1).expand(-1, n_drafts, -1), 2, indices)  # (b_sz, n_drafts, drafts_len)
+
+        return drafts  # Shape: (batch_size, n_drafts, drafts_len)
 
     def generate(self, src: 'torch.LongTensor') -> 'torch.LongTensor':
         src_b_size, src_len = src.size()
