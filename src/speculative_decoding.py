@@ -426,7 +426,7 @@ class TranslationInferenceBeamSearchSpeculativeUnbatched:
         # return s.unfold(-1, min(self.n_speculative_tokens, length - 1), 1)
         drafts_len = min(self.n_speculative_tokens, length - 1)
         start_inds = torch.zeros(b_sz).long()  # (b_sz)
-        end_inds = length - torch.cumsum(s == 0, dim=-1).bool().sum(-1) - 1  # (b_sz)
+        end_inds = length - torch.cumsum(s == 0, dim=-1).bool().sum(-1).to(start_inds.device) - 1  # (b_sz)
 
         # Ensure we don't try to create more drafts than possible
         max_possible_drafts = min(end_inds) - drafts_len + 1
@@ -550,7 +550,7 @@ class TranslationInferenceGreedySpeculative:
         # return s.unfold(-1, min(self.n_speculative_tokens, length - 1), 1)
         drafts_len = min(self.n_speculative_tokens, length - 1)
         start_inds = torch.zeros(b_sz).long()  # (b_sz)
-        end_inds = length - torch.cumsum(s == 0, dim=-1).bool().sum(-1) - 1  # (b_sz)
+        end_inds = length - torch.cumsum(s == 0, dim=-1).bool().sum(-1).to(start_inds.device) - 1  # (b_sz)
 
         # Ensure we don't try to create more drafts than possible
         max_possible_drafts = min(end_inds) - drafts_len + 1
