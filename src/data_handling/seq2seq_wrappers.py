@@ -56,13 +56,30 @@ class Seq2SeqDM(LightningDataModule):
                  shuffle_train: bool = False):
         super().__init__()
 
-        self.data_dir = Path(data_dir).resolve()
-        self.src_train_path = src_train_path or self.data_dir / "src-train.txt"
-        self.tgt_train_path = tgt_train_path or self.data_dir / "tgt-train.txt"
-        self.src_val_path = src_val_path or self.data_dir / "src-val.txt"
-        self.tgt_val_path = tgt_val_path or self.data_dir / "tgt-val.txt"
-        self.src_test_path = src_test_path or self.data_dir / "src-test.txt"
-        self.tgt_test_path = tgt_test_path or self.data_dir / "tgt-test.txt"
+        self.src_train_path = src_train_path
+        self.tgt_train_path = tgt_train_path
+        self.src_val_path = src_val_path
+        self.tgt_val_path = tgt_val_path
+        self.src_test_path = src_test_path
+        self.tgt_test_path = tgt_test_path
+        self.data_dir = data_dir
+
+        # Default paths for data splits
+        if self.data_dir is not None:
+            self.data_dir = Path(self.data_dir).resolve()
+        if self.src_train_path is None and self.data_dir is not None:
+            self.src_train_path = self.data_dir / "src-train.txt"
+        if self.tgt_train_path is None and self.data_dir is not None:
+            self.tgt_train_path = self.data_dir / "tgt-train.txt"
+        if self.src_val_path is None and self.data_dir is not None:
+            self.src_val_path = self.data_dir / "src-val.txt"
+        if self.tgt_val_path is None and self.data_dir is not None:
+            self.tgt_val_path = self.data_dir / "tgt-val.txt"
+        if self.src_test_path is None and self.data_dir is not None:
+            self.src_test_path = self.data_dir / "src-test.txt"
+        if self.tgt_test_path is None and self.data_dir is not None:
+            self.tgt_test_path = self.data_dir / "tgt-test.txt"
+        
         self.vocab_path = vocab_path
 
         self.batch_size = batch_size
@@ -83,17 +100,22 @@ class Seq2SeqDM(LightningDataModule):
 
     def setup(self, stage: str | None = None) -> None:
         if stage == "fit" or stage is None:
+            assert self.src_train_path is not None and self.tgt_train_path is not None, "Train data paths must be provided"
             self.train = Seq2SeqDataset(self.src_train_path, self.tgt_train_path, self.src_tokenizer,
                                         self.tgt_tokenizer)
+            assert self.src_val_path is not None and self.tgt_val_path is not None, "Validation data paths must be provided"
             self.val = Seq2SeqDataset(self.src_val_path, self.tgt_val_path, self.src_tokenizer, self.tgt_tokenizer)
 
         if stage == "validate":
+            assert self.src_val_path is not None and self.tgt_val_path is not None, "Validation data paths must be provided"
             self.val = Seq2SeqDataset(self.src_val_path, self.tgt_val_path, self.src_tokenizer, self.tgt_tokenizer)
 
         if stage == "test" or stage is None:
+            assert self.src_test_path is not None and self.tgt_test_path is not None, "Test data paths must be provided"
             self.test = Seq2SeqDataset(self.src_test_path, self.tgt_test_path, self.src_tokenizer, self.tgt_tokenizer)
 
         if stage == "predict" or stage is None:
+            assert self.src_test_path is not None and self.tgt_test_path is not None, "Prediction data paths must be provided"
             self.prd = Seq2SeqDataset(self.src_test_path, self.tgt_test_path, self.src_tokenizer, self.tgt_tokenizer)
 
     def collate_fn(self, batch: list[tuple[str, str]]) -> dict[str, torch.Tensor]:
