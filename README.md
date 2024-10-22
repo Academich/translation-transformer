@@ -30,15 +30,17 @@ For single-step retrosynthesis, we used USPTO50k as prepared in the [RSMILES](ht
 
 **Download USPTO MIT mixed:**
 ```bash
+THIS_REPO_PATH=$(pwd) # The full path to this repository 
 gdown https://drive.google.com/drive/folders/1fJ7Hm55IDevIi5Apna7v-rQBQStTH7Yg -O data/MIT_mixed --folder
 cd data/MIT_mixed
 python3 detokenize.py
+cd $THIS_REPO_PATH
 ```
 
 **Download USPTO 50K** and augment it using [RSMILES](https://github.com/otori-bird/retrosynthesis) augmentation.  
 Clone the RSMILES repository to some path in your system.
 ```bash
-pip install textdistance
+pip install pandas textdistance
 
 THIS_REPO_PATH=$(pwd) # The full path to this repository 
 RSMILES_PATH=../retrosynthesis  # as an example; the path to the RSMILES repository
@@ -46,8 +48,9 @@ RSMILES_PATH=../retrosynthesis  # as an example; the path to the RSMILES reposit
 gdown https://drive.google.com/drive/folders/1la4OgBKgm2K-IRwuV-GHUNjN3bcCrl6v -O ${RSMILES_PATH}/dataset/USPTO_50K --folder
 cd ${RSMILES_PATH}
 AUGMENTATIONS=20
-python3 preprocessing/generate_PtoR_data.py -augmentation ${AUGMENTATIONS} -processes 8 
+python3 preprocessing/generate_PtoR_data.py -augmentation ${AUGMENTATIONS} -processes 8 -train_only
 mv dataset/USPTO_50K_PtoR_aug${AUGMENTATIONS} ${THIS_REPO_PATH}/data # The augmented dataset is now in this repository
+cd $THIS_REPO_PATH
 ```
 
 ### Models
