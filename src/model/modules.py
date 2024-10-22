@@ -4,7 +4,7 @@ import torch
 from torch import LongTensor, BoolTensor, Tensor
 from torch import nn
 
-from models.embeddings import TokenEmbedding, PositionalEncoding
+from model.embeddings import TokenEmbedding, PositionalEncoding
 
 
 class TransformerDecoderLayerWithLeftPadding(nn.TransformerDecoderLayer):

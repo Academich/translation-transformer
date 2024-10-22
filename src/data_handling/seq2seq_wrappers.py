@@ -6,8 +6,8 @@ from torch.nn.utils.rnn import pad_sequence
 
 from pytorch_lightning import LightningDataModule
 
-from batching import TokenSampler
-from tokenization import GenericTokenizer
+from data_handling.batching import TokenSampler
+from data_handling.tokenizer_base import GenericTokenizer
 
 
 class Seq2SeqDataset(Dataset):

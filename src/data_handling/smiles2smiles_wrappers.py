@@ -1,8 +1,8 @@
 from pathlib import Path
 from itertools import chain
 
-from data_wrappers import Seq2SeqDM
-from tasks.reaction_prediction.tokenizer import ChemSMILESTokenizer
+from data_handling.seq2seq_wrappers import Seq2SeqDM
+from data_handling.tokenizer_smiles import ChemSMILESTokenizer
 
 
 class ReactionPredictionDM(Seq2SeqDM):
