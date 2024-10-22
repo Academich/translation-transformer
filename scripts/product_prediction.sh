@@ -18,11 +18,11 @@ function run_prediction() {
 
   local ATTEMPT=""
   if [ -n "${ATTEMPT_NUM}" ]; then
-    ATTEMPT="attempt_${ATTEMPT_NUM}"
+    ATTEMPT="_attempt_${ATTEMPT_NUM}"
   fi
 
   local MAX_LEN=200
-  local OUTPUT_FILE=${DATA}_${GEN}_batched_bs_${BS}_draftlen_${N_SPEC_TOK}_${ATTEMPT}.csv
+  local OUTPUT_FILE=${DATA}_${GEN}_batched_bs_${BS}_draftlen_${N_SPEC_TOK}${ATTEMPT}.csv
 
   python3 main.py predict -c ${CONFIG} \
           --ckpt_path ${CKPT_PATH} \
