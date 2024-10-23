@@ -48,8 +48,11 @@ RSMILES_PATH=../retrosynthesis  # as an example; the path to the RSMILES reposit
 gdown https://drive.google.com/drive/folders/1la4OgBKgm2K-IRwuV-GHUNjN3bcCrl6v -O ${RSMILES_PATH}/dataset/USPTO_50K --folder
 cd ${RSMILES_PATH}
 AUGMENTATIONS=20
-python3 preprocessing/generate_PtoR_data.py -augmentation ${AUGMENTATIONS} -processes 8 -train_only
+PROCESSES=8
+python3 preprocessing/generate_PtoR_data.py -augmentation ${AUGMENTATIONS} -processes ${PROCESSES} -test_except
+python3 preprocessing/generate_PtoR_data.py -augmentation 1 -processes ${PROCESSES} -test_only -canonical
 mv dataset/USPTO_50K_PtoR_aug${AUGMENTATIONS} ${THIS_REPO_PATH}/data # The augmented dataset is now in this repository
+mv dataset/USPTO_50K_PtoR_aug1 ${THIS_REPO_PATH}/data
 cd $THIS_REPO_PATH
 ```
 

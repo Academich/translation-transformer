@@ -9,10 +9,11 @@ from torch import optim
 from pytorch_lightning import LightningModule
 from pytorch_lightning.utilities.types import STEP_OUTPUT
 
-from tokenization import GenericTokenizer
-from decoding import TranslationInferenceGreedy, TranslationInferenceBeamSearch
-from speculative_decoding import TranslationInferenceGreedySpeculative, TranslationInferenceBeamSearchSpeculativeUnbatched
-from utils import NoamLRSchedule, ConstantLRSchedule, calc_token_acc, calc_sequence_acc
+from data_handling.tokenizer_base import GenericTokenizer
+from decoding.standard_decoding import TranslationInferenceGreedy, TranslationInferenceBeamSearch
+from decoding.speculative_decoding import TranslationInferenceGreedySpeculative, TranslationInferenceBeamSearchSpeculativeUnbatched
+from utils.lr_schedules import NoamLRSchedule, ConstantLRSchedule
+from utils.metrics import calc_token_acc, calc_sequence_acc
 
 
 class TranslationModel(LightningModule):

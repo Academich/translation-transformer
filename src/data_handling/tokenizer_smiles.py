@@ -3,7 +3,7 @@ from typing import Iterable
 from collections import Counter
 from itertools import chain
 
-from tokenization import GenericTokenizer, reverse_dict
+from data_handling.tokenizer_base import GenericTokenizer, reverse_dict
 
 REGEX = "(\[[^\]]+]|Br?|Cl?|N|O|S|P|F|I|b|c|n|o|s|p|\(|\)|\.|=|#|-|\+|\\\\|\/|:|~|@|\?|>|\*|\$|\%[0-9]{2}|[0-9])"
 

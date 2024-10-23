@@ -1,7 +1,7 @@
 import torch
 
-from models.modules import VanillaTransformer
-from lightning_model_wrappers import TranslationModel
+from model.modules import VanillaTransformer
+from model.lightning_model_wrappers import TranslationModel
 
 
 class VanillaTransformerTranslationLightningModule(TranslationModel):

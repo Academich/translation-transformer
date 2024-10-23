@@ -1,1 +1,0 @@
-from models.lightning_model import VanillaTransformerTranslationLightningModule

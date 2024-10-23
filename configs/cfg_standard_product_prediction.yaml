@@ -1,4 +1,3 @@
-# pytorch_lightning==2.2.1
 seed_everything: 123456
 trainer:
   accelerator: gpu
@@ -22,11 +21,6 @@ trainer:
       flush_secs: 120
       filename_suffix: ''
   callbacks:
-  - class_path: callbacks.PredictionWriter
-    init_args:
-      output_dir: results/reaction_prediction.csv
-      write_interval: batch
-  - class_path: callbacks.DecodingCallback
   - class_path: pytorch_lightning.callbacks.LearningRateMonitor
     init_args:
       logging_interval: step
@@ -81,16 +75,17 @@ trainer:
   reload_dataloaders_every_n_epochs: 0
   default_root_dir: null
 data:
-  class_path: tasks.reaction_prediction.ReactionPredictionDM
+  class_path: data_handling.ReactionPredictionDM
   init_args:
     vocab_path: data/MIT_mixed/vocabs/vocab.json
     data_dir: data/MIT_mixed
     batch_size: 32
     num_workers: 4
     persistent_workers: false
+    pin_memory: false
     shuffle_train: true
 model:
-  class_path: models.VanillaTransformerTranslationLightningModule
+  class_path: model.VanillaTransformerTranslationLightningModule
   init_args:
     embedding_dim: 256
     feedforward_dim: 2048
@@ -107,3 +102,4 @@ model:
     generation: beam_search
     beam_size: 5
     max_len: 150
+    report_prediction_time: true

@@ -140,6 +140,7 @@ data/*
 # But keep files directly in the data folder
 !data/*.*
 
+checkpoints/
 results/
 product_prediction/
 product_results_greedy/
