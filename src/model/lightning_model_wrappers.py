@@ -16,7 +16,7 @@ from utils.lr_schedules import NoamLRSchedule, ConstantLRSchedule
 from utils.metrics import calc_token_acc, calc_sequence_acc
 
 
-class TranslationModel(LightningModule):
+class VanillaEncoderDecoderTransformerLightning(LightningModule):
 
     def __init__(self,
                  src_tokenizer: GenericTokenizer | None = None,  # Tokenizer objects
@@ -57,8 +57,6 @@ class TranslationModel(LightningModule):
         self.criterion = nn.CrossEntropyLoss(reduction="mean")
 
         self.model = self._create_model()
-        assert self.model is not None, \
-            f"Override the _create_model method in {self.__class__} to assign an nn.Module to self.model"
 
         self.generator = self._create_generator()
         print(self.generator)
@@ -66,9 +64,20 @@ class TranslationModel(LightningModule):
         self.report_prediction_time = report_prediction_time
         self.prediction_start_time = None
 
-    def _create_model(self) -> nn.Module:
-        raise NotImplementedError
-
+    def _create_model(self) -> torch.nn.Module:
+        model = VanillaTransformer(self.src_vocab_size,
+                                   self.tgt_vocab_size,
+                                   self.hparams.num_encoder_layers,
+                                   self.hparams.num_decoder_layers,
+                                   self.hparams.embedding_dim,
+                                   self.hparams.num_heads,
+                                   self.hparams.feedforward_dim,
+                                   self.hparams.dropout_rate,
+                                   self.hparams.activation,
+                                   self.hparams.share_embeddings,
+                                   self.src_pad_token_i,
+                                   self.tgt_pad_token_i)
+        return model
     def _create_generator(self):
         if self.hparams.generation == "greedy":
             return TranslationInferenceGreedy(self.model,
@@ -121,7 +130,9 @@ class TranslationModel(LightningModule):
         The output is the predicted next token probability distribution,
         a tensor of shape BATCH_SIZE x SEQUENCE_LENGTH x TARGET_VOCABULARY_SIZE
         """
-        raise NotImplementedError
+        return self.model(batch["src_tokens"],
+                          batch["tgt_tokens"][:, :-1])
+
 
     def _calc_loss(self, logits, tgt_ids):
         _, _, tgt_vocab_size = logits.size()
