@@ -85,7 +85,7 @@ data:
     pin_memory: false
     shuffle_train: true
 model:
-  class_path: model.VanillaTransformerTranslationLightningModule
+  class_path: model.VanillaEncoderDecoderTransformerLightning
   init_args:
     embedding_dim: 256
     feedforward_dim: 2048

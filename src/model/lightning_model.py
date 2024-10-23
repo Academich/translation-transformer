@@ -12,6 +12,7 @@ from pytorch_lightning.utilities.types import STEP_OUTPUT
 from data_handling.tokenizer_base import GenericTokenizer
 from decoding.standard_decoding import TranslationInferenceGreedy, TranslationInferenceBeamSearch
 from decoding.speculative_decoding import TranslationInferenceGreedySpeculative, TranslationInferenceBeamSearchSpeculativeUnbatched
+from model.modules import VanillaTransformer
 from utils.lr_schedules import NoamLRSchedule, ConstantLRSchedule
 from utils.metrics import calc_token_acc, calc_sequence_acc
 
@@ -21,6 +22,15 @@ class VanillaEncoderDecoderTransformerLightning(LightningModule):
     def __init__(self,
                  src_tokenizer: GenericTokenizer | None = None,  # Tokenizer objects
                  tgt_tokenizer: GenericTokenizer | None = None,
+
+                 embedding_dim: int = 128,  # Model arguments
+                 feedforward_dim: int = 256,
+                 num_encoder_layers: int = 3,
+                 num_decoder_layers: int = 3,
+                 num_heads: int = 4,
+                 dropout_rate: float = 0.0,
+                 activation: str = "relu",
+                 share_embeddings: bool = False,
 
                  learning_rate: float = 3e-4,  # Optimization arguments
                  weight_decay: float = 0.,
