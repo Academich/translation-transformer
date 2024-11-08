@@ -16,9 +16,10 @@ def canonicalize_smiles(s):
 def main(filename: str):
     with open(filename) as f:
         lines = [i.strip() for i in f.readlines()]
-    target, preds = [], []
+    source, target, preds = [], [], []
     for line in lines:
-        t, *ps = line.split(",")
+        s, t, *ps = line.split(",")
+        source.append(s)
         target.append(t)
         preds.append(ps)
     preds = pd.DataFrame(preds).fillna("")
@@ -49,4 +50,4 @@ if __name__ == '__main__':
     parser = ArgumentParser()
     parser.add_argument("--filename", '-f', type=str)
     args = parser.parse_args()
-    main(args.filename, args.n_augm)
+    main(args.filename)
