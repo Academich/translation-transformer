@@ -76,3 +76,19 @@ Download single-step retrosynthesis checkpoints
 mkdir checkpoints/single_step_retrosynthesis
 gdown https://drive.google.com/drive/folders/1v4pKYWlE0qNA-ksa7yX55i7qMeesURON -O checkpoints/single_step_retrosynthesis --folder
 ```
+
+### Inference
+The scripts `scripts/product_prediction.sh` and `scripts/single_step_retrosynthesis.sh` run the models for reaction product prediction and single-step retrosynthesis, respectively.  
+The forward pass of the transformer is implemented in `src/model/lightning_model.py`.  
+The sampling of sequences from the logits predicted by the transformer is implemented in `src/decoding/standard_decoding.py` and `src/decoding/speculative_decoding.py`.  
+The generated sequences are written to CSV files using the `PredictionWriter` callback implemented in `src/callbacks.py`. For example, the script `scripts/product_prediction.sh` loads a checkpoint of the transformer and runs the model on the USPTO MIT mixed test dataset.  
+The generated sequences are then saved to, e.g., `results_product_greedy_speculative/MIT_mixed_greedy_speculative_batched_bs_1_draftlen_10.csv`. 
+
+### Evaluating performance
+The script `src/score_predictions.py` scores the predictions saved in CSV files. It calculates the top-N accuracy and the percentage of invalid SMILES.
+
+Example usage:
+```bash
+python3 src/score_predictions.py -f results_product_greedy_speculative/MIT_mixed_greedy_speculative_batched_bs_1_draftlen_10.csv
+```
+The accuracy is printed to the terminal.
