@@ -25,7 +25,7 @@ function run_prediction() {
   local NUCLEUS=20.
   local MAX_NUM_OF_DRAFTS=23
   local DRAFT_MODE=true
-  local OUTPUT_FILE=${DATA}_${GEN}_bs_${BS}_nbest_${NBEST}_draftlen_${N_SPEC_TOK}${ATTEMPT}.csv
+  local OUTPUT_FILE=${TEST_DATA_PATH}_${GEN}_bs_${BS}_nbest_${NBEST}_draftlen_${N_SPEC_TOK}${ATTEMPT}.csv
 
   python3 main.py predict -c ${CONFIG} \
           --ckpt_path ${CKPT_PATH} \
