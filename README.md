@@ -30,11 +30,8 @@ For single-step retrosynthesis, we used USPTO50k as prepared in the [RSMILES](ht
 
 **Download USPTO MIT mixed:**
 ```bash
-THIS_REPO_PATH=$(pwd) # The full path to this repository 
 gdown https://drive.google.com/drive/folders/1fJ7Hm55IDevIi5Apna7v-rQBQStTH7Yg -O data/MIT_mixed --folder
-cd data/MIT_mixed
-python3 detokenize.py
-cd $THIS_REPO_PATH
+python3 src/detokenize.py --data_dir data/MIT_mixed
 ```
 
 **Download USPTO 50K** and augment it using [RSMILES](https://github.com/otori-bird/retrosynthesis) augmentation.  
@@ -54,6 +51,9 @@ python3 preprocessing/generate_PtoR_data.py -augmentation 1 -processes ${PROCESS
 mv dataset/USPTO_50K_PtoR_aug${AUGMENTATIONS} ${THIS_REPO_PATH}/data # The augmented dataset is now in this repository
 mv dataset/USPTO_50K_PtoR_aug1 ${THIS_REPO_PATH}/data
 cd $THIS_REPO_PATH
+python3 src/detokenize.py --data_dir data/USPTO_50K_PtoR_aug1/test
+python3 src/detokenize.py --data_dir data/USPTO_50K_PtoR_aug20/train
+python3 src/detokenize.py --data_dir data/USPTO_50K_PtoR_aug20/val
 ```
 
 ### Models
