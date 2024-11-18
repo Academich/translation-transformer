@@ -1,0 +1,10 @@
+C1CCOC1.N#Cc1ccsc1N.O=[N+]([O-])c1cc(F)c(F)cc1F.[H-].[Na+]
+CCCCP(CCCC)CCCC.COC(=O)Cc1cn(C)c2cc(O)ccc12.Cc1ccccc1.Cc1nn(-c2ccc(C(F)(F)F)cc2)cc1C(C)CO
+CCOCC.Cl.Cl.ClC(Cl)Cl.NC1CCN(CC2Cn3c(=O)ccc4ncc(F)c2c43)CC1O.O=Cc1cc2c(cn1)OCS2
+C=C(C)C(=O)Cl.CC(C)=C1C(=O)N(c2ccc(O)cc2)C(=O)C1=C(C)c1cc(-c2ccccc2)sc1C.CCN(CC)CC.ClCCl
+O=Cc1cncc(Cl)c1COC1CCCCO1.OCc1c(Cl)cncc1Cl
+COc1ccc(CN(Cc2ccc(OC)cc2)c2nc(C)nc(-c3cc(CN4CCN(S(C)(=O)=O)CC4C)cnc3Nc3cnc(OC)c(F)c3)n2)cc1.O=C(O)C(F)(F)F.O=S(=O)(O)C(F)(F)F
+CCCCC1CO1.Cc1cccc(C)c1.Cl.[Cl-]
+C1CCOC1.Cl.OCCCN1CCCCC1.Oc1ccc(-c2nc(CN3CCCCC3)co2)cc1F.c1ccc(P(c2ccccc2)c2ccccc2)cc1
+CSCCNc1cccc2nc(NCc3ccc(C)o3)ccc12.ClCCl.O=C(OO)c1cccc(Cl)c1
+C1CCOC1.CCOCCCO.Clc1nsnc1-c1cccnc1.O.[H-].[Na+]
