@@ -53,8 +53,8 @@ mv dataset/USPTO_50K_PtoR_aug${AUGMENTATIONS} ${THIS_REPO_PATH}/data # The augme
 mv dataset/USPTO_50K_PtoR_aug1 ${THIS_REPO_PATH}/data
 cd $THIS_REPO_PATH
 python3 src/detokenize.py --data_dir data/USPTO_50K_PtoR_aug1/test
-python3 src/detokenize.py --data_dir data/USPTO_50K_PtoR_aug20/train
-python3 src/detokenize.py --data_dir data/USPTO_50K_PtoR_aug20/val
+python3 src/detokenize.py --data_dir data/USPTO_50K_PtoR_aug${AUGMENTATIONS}/train
+python3 src/detokenize.py --data_dir data/USPTO_50K_PtoR_aug${AUGMENTATIONS}/val
 ```
 
 ### Models
