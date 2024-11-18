@@ -22,6 +22,7 @@ pip install tensorboard
 pip install gdown
 pip install -e .
 ```
+If you are using Weights&Biases, run also `pip install wandb`.
 
 ### Data
 
