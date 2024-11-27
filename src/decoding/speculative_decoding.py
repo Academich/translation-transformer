@@ -67,6 +67,7 @@ class TranslationInferenceBeamSearchSpeculativeUnbatched:
         self.bos_token = bos_token
         self.eos_token = eos_token
         self.draft_mode = draft_mode
+        self.c_token = 4
         if self.draft_mode:
             self.n_speculative_tokens = n_speculative_tokens
             self.max_drafts_num = max_num_of_drafts
@@ -421,29 +422,42 @@ class TranslationInferenceBeamSearchSpeculativeUnbatched:
             # -> (n_drafts, draft_len=1)
         return drafts
 
-    def get_drafts_linspace(self, s: torch.Tensor) -> torch.Tensor:
-        b_sz, length = s.size()
-        # return s.unfold(-1, min(self.n_speculative_tokens, length - 1), 1)
-        drafts_len = min(self.n_speculative_tokens, length - 1)
-        start_inds = torch.zeros(b_sz).long()  # (b_sz)
-        end_inds = length - torch.cumsum(s == 0, dim=-1).bool().sum(-1).to(start_inds.device) - 1  # (b_sz)
+    def get_drafts_linspace(self, src: torch.Tensor) -> torch.Tensor:
+        s = src[:, 1:].clone().detach()  # we don't need the bos token
+        end_inds = torch.nonzero(s == self.eos_token, as_tuple=True)[1]  # (b_sz)
+        s.masked_fill_(s == self.pad_token, self.c_token)
+        s.masked_fill_(s == self.eos_token, self.c_token)
+        b_sz, s_len = s.size()
+        max_draft_len = 200
+        min_draft_len = 10
+        drafts_len = max(min_draft_len, self.n_speculative_tokens)
+        drafts_len = min(drafts_len, max_draft_len)
+
+        start_inds = torch.full((b_sz,), 0, device=s.device)  # (b_sz)
 
         # Ensure we don't try to create more drafts than possible
-        max_possible_drafts = min(end_inds) - drafts_len + 1
-        n_drafts = min(self.max_drafts_num, max_possible_drafts)
+        last_draft_len = 10
+        possible_drafts_num = min(end_inds) - last_draft_len + 1
+
+        n_drafts = min(self.max_drafts_num, possible_drafts_num)
 
         if n_drafts <= 1:
             return s[:, :drafts_len].unsqueeze(1)
 
-        base_range = torch.arange(n_drafts).unsqueeze(0).repeat(b_sz, 1)  # (b_sz, n_drafts)
+        base_range = torch.arange(n_drafts).unsqueeze(0).repeat(b_sz, 1).to(s.device)  # (b_sz, n_drafts)
 
-        const_multiplier = (end_inds - drafts_len - start_inds) / (torch.ones(b_sz) * n_drafts - 1)  # (b_sz)
+        const_multiplier = (end_inds - last_draft_len - start_inds) / torch.full((b_sz,), n_drafts - 1,
+                                                                                 device=s.device)  # (b_sz)
         start_inds_of_drafts = (
-                    start_inds.unsqueeze(-1) + const_multiplier.unsqueeze(-1) * base_range).long()  # (b_sz, n_drafts)
+                start_inds.unsqueeze(-1) + const_multiplier.unsqueeze(-1) * base_range).long()  # (b_sz, n_drafts)
+        the_most_right_ind = torch.max(start_inds_of_drafts).item() + drafts_len
+        if the_most_right_ind > s_len - 1:
+            pad_tensor = torch.full((b_sz, the_most_right_ind - s_len + 2), self.c_token, device=s.device)
+            s = torch.cat((s, pad_tensor), dim=-1)
 
         indices = start_inds_of_drafts.unsqueeze(-1) + torch.arange(drafts_len).unsqueeze(0).unsqueeze(
-            0)  # (b_sz, n_drafts, drafts_len)
-        indices = indices.to(s.device)
+            0).to(s.device)  # (b_sz, n_drafts, drafts_len)
+
         # Use gather to create drafts
         drafts = torch.gather(s.unsqueeze(1).expand(-1, n_drafts, -1), 2, indices)  # (b_sz=1, n_drafts, drafts_len)
 
