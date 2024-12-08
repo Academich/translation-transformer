@@ -3,6 +3,7 @@ import torch
 from torch.nn.utils.rnn import pad_sequence
 from collections import defaultdict
 
+
 def move_pads_to_the_right(arr: torch.Tensor, pad_token: int = 0) -> torch.Tensor:
     """
     Moves pad tokens "pad_tokens" from the left side of the tensor to the right.
@@ -107,6 +108,8 @@ class TranslationInferenceBeamSearchSpeculativeBatchedWithoutLeftPads:
         drafted_len = curr_lines.shape[1]
         n_candidates, draft_len_plus_one, vocab_size = pred_logits.size()
 
+        draft_len = draft_len_plus_one - 1
+
         masked_logits = mask_with_num_logits_according_nucleus(pred_logits, nucleus=20.,
                                                                max_num_of_unmasked_positions=self.n_best,
                                                                num=0.)
@@ -120,9 +123,20 @@ class TranslationInferenceBeamSearchSpeculativeBatchedWithoutLeftPads:
         #   -> (n_candidates, draft_len + 1)
         masked_logits *= mask_for_unaccepted_draft_tokens.unsqueeze(-1)
 
-        masked_logits[:, :-1, :].scatter_(index=chosen_drafts.unsqueeze(-1), dim=2, value=0.)
+        not_entirely_excepted_bool = n_accepted != draft_len
+        #   -> (n_candidates)
+        if not_entirely_excepted_bool.sum().item() > 0:
+            # We need to change the first token in the drafts, following the last accepted token, to the bos token in
+            # order to build the right top n tree of sequences
+            chosen_drafts[not_entirely_excepted_bool] = chosen_drafts[not_entirely_excepted_bool].scatter(
+                index=n_accepted[not_entirely_excepted_bool].unsqueeze(-1), dim=1, value=self.bos_token_idx)
 
-        candts_inds, token_postn, token_inds = torch.nonzero(masked_logits, as_tuple=True)  # (num)
+        masked_logits[:, :-1, :].scatter_(index=chosen_drafts.unsqueeze(-1), dim=2, value=0.)  # the accepted tokens in
+        # the drafts can not be leaves of the top n tree of sequences
+
+        # Sampling the top n tree of sequences leaves:
+        candts_inds, token_postn, token_inds = torch.nonzero(masked_logits, as_tuple=True)
+        # -> (num)
 
         ################################################################################################################
         if n_candidates == b_size:
@@ -321,7 +335,7 @@ class TranslationInferenceBeamSearchSpeculativeBatchedWithoutLeftPads:
 
             ###########################################################################################################
             max_num_of_new_seqs = torch.max(num_of_new_seqs_for_each_in_batch).item()
-
+            max_num_of_new_seqs = max(max_num_of_new_seqs, self.n_best)
             if (num_of_new_seqs_for_each_in_batch == max_num_of_new_seqs).sum() != b_size:
                 # We make fake sequences with an artificial probability -inf in case if a different number of sequences
                 # were sampled on the basis of the chosen drafts
@@ -344,7 +358,8 @@ class TranslationInferenceBeamSearchSpeculativeBatchedWithoutLeftPads:
                 # -> (b_size * max_num_of_new_seqs, drafted_len + 1)
                 new_log_probs_history = new_log_probs_history[inds]
                 # -> (b_size * max_num_of_new_seqs, max_len)
-                new_log_probs_history[mask_for_logprobs] = -float("inf")
+                new_candidates[mask_for_logprobs, 1] = self.eos_token_idx  # fake sequences
+                new_log_probs_history[mask_for_logprobs] = -float("inf")  # fake probabilities
             #############################################################################################
 
             new_log_probs = torch.min(new_log_probs_history, dim=1).values
@@ -661,6 +676,8 @@ class TranslationInferenceBeamSearchSpeculativeUnbatched:
                 #   -> (n_candidates * n_drafts, draft_len + 1, vocab_size)
 
                 # All unapproved tokens in masked_probs have zero probability
+                # We use nucleus=0.9975 and max_num_of_unmasked_positions=5 to avoid sampling of low probable sequences
+                # and reduce calculation
                 masked_probs = mask_with_num_logits_according_nucleus(pred_logits, nucleus=0.9975,
                                                                       max_num_of_unmasked_positions=5,
                                                                       num="-inf").softmax(-1)
@@ -774,7 +791,7 @@ class TranslationInferenceBeamSearchSpeculativeUnbatched:
                 finished_candidates_t = finished_candidates_t[:self.n_best]
                 finished_candidates_log_probs_t = finished_candidates_log_probs_t[:self.n_best]
                 result.append(finished_candidates_t)  # (n, max_len)
-        
+
         return torch.cat([r.unsqueeze(0) for r in result], dim=0)
 
     def calculate_n_accepted_in_drafts(self, draft_tokens, masked_probs):
@@ -828,7 +845,8 @@ class TranslationInferenceBeamSearchSpeculativeUnbatched:
             src_unbatched_i_pads = (src_unbatched_i == self.pad_token).int().sum(-1)
             n_tokens_without_pads = src_unbatched_i.size(1) - src_unbatched_i_pads
             src_unbatched_i_unpadded = src_unbatched_i[:, :n_tokens_without_pads]
-            drafts = src_unbatched_i_unpadded.unfold(-1, min(self.n_speculative_tokens, src_unbatched_i_unpadded.shape[1] - 1),
+            drafts = src_unbatched_i_unpadded.unfold(-1, min(self.n_speculative_tokens,
+                                                             src_unbatched_i_unpadded.shape[1] - 1),
                                                      1).squeeze(0)[:self.max_drafts_num, :]
             # -> (n_drafts, draft_len = min(self.draft_len, unpadded_src_len - 1))
         else:
@@ -952,7 +970,7 @@ class TranslationInferenceGreedySpeculative:
     def get_drafts(self, s: torch.Tensor) -> torch.Tensor:
         _, length = s.size()
         return s.unfold(-1, min(self.n_speculative_tokens, length - 1), 1)
-    
+
     def get_drafts_linspace_ver0(self, s: torch.Tensor) -> torch.Tensor:
         b_size, length = s.size()
 
@@ -991,7 +1009,7 @@ class TranslationInferenceGreedySpeculative:
 
         const_multiplier = (end_inds - drafts_len - start_inds) / (torch.ones(b_sz) * n_drafts - 1)  # (b_sz)
         start_inds_of_drafts = (
-                    start_inds.unsqueeze(-1) + const_multiplier.unsqueeze(-1) * base_range).long()  # (b_sz, n_drafts)
+                start_inds.unsqueeze(-1) + const_multiplier.unsqueeze(-1) * base_range).long()  # (b_sz, n_drafts)
 
         indices = start_inds_of_drafts.unsqueeze(-1) + torch.arange(drafts_len).unsqueeze(0).unsqueeze(
             0)  # (b_sz, n_drafts, drafts_len)
@@ -1027,7 +1045,7 @@ class TranslationInferenceGreedySpeculative:
 
             # Attach every draft to every sequence decoded so far
             drafted_seqs = torch.cat([generated_tokens.unsqueeze(1).repeat(1, n_drafts, 1), draft_tokens],
-                                       dim=-1).reshape(b_size * n_drafts, -1)
+                                     dim=-1).reshape(b_size * n_drafts, -1)
             # [generated_tokens: (b_size, gnrtd_len)] -unsqz-> (b_size, 1, gnrtd_len)
             # -rpt-> (b_size, n_drafts, gnrtd_len)
             # -cat wth (b_size, n_drafts, n_spec_tok)-> (b_size, n_drafts, gnrtd_len + n_spec_tok)
