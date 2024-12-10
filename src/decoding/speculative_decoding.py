@@ -479,7 +479,7 @@ class TranslationInferenceBeamSearchSpeculativeBatchedWithoutLeftPads:
         start_inds = torch.full((b_sz,), 0, device=s.device)  # (b_sz)
 
         # Ensure we don't try to create more drafts than possible
-        last_draft_len = 10
+        last_draft_len = self.min_draft_len
         possible_drafts_num = min(end_inds) - last_draft_len + 1
 
         n_drafts = min(self.max_drafts_num, possible_drafts_num)
