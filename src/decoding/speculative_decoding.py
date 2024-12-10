@@ -90,6 +90,9 @@ class TranslationInferenceBeamSearchSpeculativeBatchedWithoutLeftPads:
             print(f"The draft length should be in range [{self.min_draft_len}: {self.max_draft_len}], so it was changed to {drafts_len}")
         self.n_speculative_tokens = drafts_len
 
+        self.acceptance_rate_pad_for_alredy_finished_seqs = -1  # should be negative
+        self.acceptance_rate_pad_for_fake_seqs = -7  # should be negative
+
     def __str__(self):
         return f"SpeculativeSampling decoding (n_best={self.n_best}, max_len={self.max_len}, max_num_of_drafts={self.max_drafts_num}, n_speculative_tokens={self.n_speculative_tokens})"
 
@@ -111,6 +114,9 @@ class TranslationInferenceBeamSearchSpeculativeBatchedWithoutLeftPads:
           ->  new_lines: tensor (num_lines, max_len),
               new_log_probs_history: tensor (num_lines, max_len)
               num_of_new_seqs_for_each_in_batch: tensor (b_size)
+              token_postn: tensor (num_lines), to calculate the number of accepted tokens in the next top n sequences
+                later; self.acceptance_rate_pad_for_alredy_finished_seqs means that the given sequence had already the
+                eos token and so didn't need subsequent tokens
         """
         drafted_len = curr_lines.shape[1]
         n_candidates, draft_len_plus_one, vocab_size = pred_logits.size()
@@ -162,6 +168,8 @@ class TranslationInferenceBeamSearchSpeculativeBatchedWithoutLeftPads:
 
         num = token_inds.size()[0]
         previous_roots = curr_lines[candts_inds]  # (num, drafted_len)
+        already_finished_given_seqs = (previous_roots == self.eos_token_idx).sum(-1).bool()  # -> (num)
+
         log_prob_history_of_roots = curr_log_probs_history[candts_inds]  # (num, max_len)
         bool_idx = bool_idx[candts_inds]  # (num, max_len)
 
@@ -195,7 +203,10 @@ class TranslationInferenceBeamSearchSpeculativeBatchedWithoutLeftPads:
             -1)  # it is new sequences sampled from the chosen drafts
         log_prob_history_of_roots[tmp] = new_seqs_log_probs.reshape(-1)
 
-        return previous_roots, log_prob_history_of_roots, num_of_new_seqs_for_each_in_batch
+        token_postn[already_finished_given_seqs] = self.acceptance_rate_pad_for_alredy_finished_seqs
+        # the given sequences with eos didn't need the draft tokens. We
+        # don't take pads into account calculating the acceptance rate
+        return previous_roots, log_prob_history_of_roots, num_of_new_seqs_for_each_in_batch, token_postn
 
     def generate(self, src: 'torch.LongTensor') -> list['torch.LongTensor']:
         draft_tokens = self.get_drafts_linspace(src)
@@ -336,7 +347,7 @@ class TranslationInferenceBeamSearchSpeculativeBatchedWithoutLeftPads:
             # Sample all possible lines within the chosen drafts:
             # new_candidates have the initial tokens and the new ones
 
-            new_candidates, new_log_probs_history, num_of_new_seqs_for_each_in_batch = \
+            new_candidates, new_log_probs_history, num_of_new_seqs_for_each_in_batch, accepted_tokens_num = \
                 self.sample(generated_tokens, log_probs_history, pred_logits,
                             chosen_drafts, b_size, bool_idx, n_accepted.squeeze(-1))
 
@@ -354,19 +365,22 @@ class TranslationInferenceBeamSearchSpeculativeBatchedWithoutLeftPads:
                                                                                                     b_size)
                 # -> (max_num_of_new_seqs, b_size)
 
-                mask_for_logprobs = inds >= num_of_new_seqs_for_each_in_batch.unsqueeze(0)
+                mask_for_fake_seqs = inds >= num_of_new_seqs_for_each_in_batch.unsqueeze(0)
                 inds = start_inds + (inds % num_of_new_seqs_for_each_in_batch)
 
                 inds = inds.transpose(0, 1).reshape(-1)
                 # -> (b_size * max_num_of_new_seqs)
-                mask_for_logprobs = mask_for_logprobs.transpose(0, 1).reshape(
+                mask_for_fake_seqs = mask_for_fake_seqs.transpose(0, 1).reshape(
                     -1)  # -> (b_size * max_num_of_new_seqs)
                 new_candidates = new_candidates[inds]
                 # -> (b_size * max_num_of_new_seqs, drafted_len + 1)
                 new_log_probs_history = new_log_probs_history[inds]
                 # -> (b_size * max_num_of_new_seqs, max_len)
-                new_candidates[mask_for_logprobs, 1] = self.eos_token_idx  # fake sequences
-                new_log_probs_history[mask_for_logprobs] = -float("inf")  # fake probabilities
+                accepted_tokens_num = accepted_tokens_num[inds]
+                # -> (b_size * max_num_of_new_seqs)
+                new_candidates[mask_for_fake_seqs, 1] = self.eos_token_idx  # fake sequences
+                new_log_probs_history[mask_for_fake_seqs, 1] = -float("inf")  # fake probabilities
+                accepted_tokens_num[mask_for_fake_seqs] = self.acceptance_rate_pad_for_fake_seqs  # fake
             #############################################################################################
 
             new_log_probs = torch.min(new_log_probs_history, dim=1).values
@@ -380,6 +394,18 @@ class TranslationInferenceBeamSearchSpeculativeBatchedWithoutLeftPads:
             # -> (b_size, max_num_of_new_seqs, drafted_len + 1)
             new_log_probs_history = new_log_probs_history.reshape(b_size, max_num_of_new_seqs, -1)
             # -> (b_size, max_num_of_new_seqs, max_len)
+            accepted_tokens_num = accepted_tokens_num.reshape(b_size, max_num_of_new_seqs)
+            # -> (b_size, max_num_of_new_seqs)
+
+            accepted_tokens_num = torch.gather(accepted_tokens_num, 1, top_inds)
+            # -> (b_size, beam_size)
+
+            not_fake_bool = accepted_tokens_num != self.acceptance_rate_pad_for_fake_seqs
+            # -> (b_size, beam_size)
+            accepted_tokens_num = accepted_tokens_num[accepted_tokens_num > 0]
+            curr_accepted_tokens_num = accepted_tokens_num.sum().item()
+            self.accepted_tokens_num += curr_accepted_tokens_num
+            self.produced_non_pad_tokens += curr_accepted_tokens_num + accepted_tokens_num.size(0)
 
             top_inds = top_inds.unsqueeze(-1).repeat(1, 1, new_log_probs_history.shape[-1])
             # -> (b_size, beam_size, max_len)
@@ -388,17 +414,18 @@ class TranslationInferenceBeamSearchSpeculativeBatchedWithoutLeftPads:
             new_candidates = torch.gather(new_candidates, 1, top_inds[:, :, :new_candidates.shape[-1]])
             # -> (b_size, beam_size, drafted_len + 1)
 
-            if (new_candidates == self.eos_token_idx).sum(-1).bool().sum() == b_size * self.n_best:
+            if (new_candidates[not_fake_bool] == self.eos_token_idx).sum(-1).bool().sum() == b_size * self.n_best:
                 break
 
             generated_tokens = new_candidates.reshape(b_size * self.n_best, -1)
             # -> (b_size * beam_size, drafted_len + 1)
             new_log_probs_history = new_log_probs_history.reshape(b_size * self.n_best, -1)
             # -> (b_size * beam_size, max_len)
-
+            not_fake_bool = not_fake_bool.reshape(b_size * self.n_best)
+            # -> (b_size * beam_size)
             log_probs_history = new_log_probs_history
 
-            possible_draft_len = torch.min((new_log_probs_history == self.log_prob_pad).sum(-1)).item() - 1
+            possible_draft_len = torch.min((new_log_probs_history[not_fake_bool] == self.log_prob_pad).sum(-1)).item() - 1
         return new_candidates
 
     def calculate_n_accepted_in_drafts(self, draft_tokens, masked_probs):
