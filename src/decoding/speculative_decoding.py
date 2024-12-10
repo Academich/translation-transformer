@@ -70,8 +70,6 @@ class TranslationInferenceBeamSearchSpeculativeBatchedWithoutLeftPads:
         self.eos_token_idx = eos_token
         self.C_token_idx = C_token
 
-        self.n_speculative_tokens = n_speculative_tokens
-
         self.n_best = n_best
 
         self.accepted_tokens_num = 0
@@ -82,9 +80,18 @@ class TranslationInferenceBeamSearchSpeculativeBatchedWithoutLeftPads:
         self.log_prob_pad = 7.  # should be more than 0.
 
         self.n_drafts = 0
+        self.produced_non_pad_tokens = 0
+
+        self.max_draft_len = 200
+        self.min_draft_len = 5
+        drafts_len = max(self.min_draft_len, self.n_speculative_tokens)
+        drafts_len = min(drafts_len, self.max_draft_len)
+        if drafts_len != n_speculative_tokens:
+            print(f"The draft length should be in range [{self.min_draft_len}: {self.max_draft_len}], so it was changed to {drafts_len}")
+        self.n_speculative_tokens = drafts_len
 
     def __str__(self):
-        return f"SpeculativeSampling decoding (n_best={self.n_best}, max_len={self.max_len})"
+        return f"SpeculativeSampling decoding (n_best={self.n_best}, max_len={self.max_len}, max_num_of_drafts={self.max_drafts_num}, n_speculative_tokens={self.n_speculative_tokens})"
 
     def sample(self, curr_lines, curr_log_probs_history, pred_logits, chosen_drafts, b_size, bool_idx, n_accepted):
         """
@@ -440,10 +447,9 @@ class TranslationInferenceBeamSearchSpeculativeBatchedWithoutLeftPads:
         s.masked_fill_(s == self.pad_token_idx, self.C_token_idx)
         s.masked_fill_(s == self.eos_token_idx, self.C_token_idx)
         b_sz, s_len = s.size()
-        max_draft_len = 200
-        min_draft_len = 10
-        drafts_len = max(min_draft_len, self.n_speculative_tokens)
-        drafts_len = min(drafts_len, max_draft_len)
+
+        drafts_len = max(self.min_draft_len, self.n_speculative_tokens)
+        drafts_len = min(drafts_len, self.max_draft_len)
 
         start_inds = torch.full((b_sz,), 0, device=s.device)  # (b_sz)
 
