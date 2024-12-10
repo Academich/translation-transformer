@@ -11,7 +11,7 @@ from pytorch_lightning.utilities.types import STEP_OUTPUT
 
 from data_handling.tokenizer_base import GenericTokenizer
 from decoding.standard_decoding import TranslationInferenceGreedy, TranslationInferenceBeamSearch
-from decoding.speculative_decoding import TranslationInferenceGreedySpeculative, TranslationInferenceBeamSearchSpeculativeUnbatched
+from decoding.speculative_decoding import TranslationInferenceGreedySpeculative, TranslationInferenceBeamSearchSpeculativeUnbatched, TranslationInferenceBeamSearchSpeculativeBatchedWithoutLeftPads
 from model.modules import VanillaTransformer
 from utils.lr_schedules import NoamLRSchedule, ConstantLRSchedule
 from utils.metrics import calc_token_acc, calc_sequence_acc
@@ -115,17 +115,17 @@ class VanillaEncoderDecoderTransformerLightning(LightningModule):
                 eos_token=self.tgt_eos_token_i
             )
         elif self.hparams.generation == "beam_search_speculative":
-            return TranslationInferenceBeamSearchSpeculativeUnbatched(
+            return TranslationInferenceBeamSearchSpeculativeBatchedWithoutLeftPads(
                 self.model,
+                vocab_size=self.tgt_vocab_size,
                 max_len=self.hparams.max_len,
                 n_best=self.hparams.n_best,
                 n_speculative_tokens=self.hparams.n_speculative_tokens,
-                nucleus=self.hparams.nucleus,
                 max_num_of_drafts=self.hparams.max_num_of_drafts,
-                draft_mode=self.hparams.draft_mode,
                 pad_token=self.tgt_pad_token_i,
                 bos_token=self.tgt_bos_token_i,
-                eos_token=self.tgt_eos_token_i
+                eos_token=self.tgt_eos_token_i,
+                C_token=self.tgt_tokenizer.encoder_dict["c"]
             )
 
         else:
@@ -214,17 +214,21 @@ class VanillaEncoderDecoderTransformerLightning(LightningModule):
 
     def on_predict_end(self) -> None:
         print("Number of model calls:", self.generator.model_calls_num)
-        print("Number of non-pad tokens:", self.generator.given_tokens)
         if self.hparams.generation == "greedy_speculative" or self.hparams.generation == "beam_search_speculative":
-            print("acceptance_rate:", self.generator.accepted_tokens_num / self.generator.given_tokens)
+            print("accepted tokens num:", self.generator.accepted_tokens_num)
+            print("acceptance rate:", self.generator.accepted_tokens_num / self.generator.produced_non_pad_tokens)
         if self.report_prediction_time:
             elapsed = datetime.timedelta(seconds=timer() - self.prediction_start_time)
             print(f"Predict time elapsed: {elapsed}; total seconds: {elapsed.total_seconds()}")
             print("Decoding:", self.generator)
             if self.hparams.report_prediction_file is not None:
                 with open(self.hparams.report_prediction_file, "a") as f:
-                    print(f"Predict time elapsed: {elapsed}; total seconds: {elapsed.total_seconds()}", file=f)
                     print("Decoding:", self.generator, file=f)
+                    print(f"Predict time elapsed: {elapsed}; total seconds: {elapsed.total_seconds()}", file=f)
+                    print("Number of model calls:", self.generator.model_calls_num, file=f)
+                    if self.hparams.generation == "greedy_speculative" or self.hparams.generation == "beam_search_speculative":
+                        print("accepted tokens:", self.generator.accepted_tokens_num, file=f)
+                        print("acceptance rate:", self.generator.accepted_tokens_num / self.generator.produced_non_pad_tokens, file=f)
                     print(file=f)
 
     def configure_optimizers(self):
