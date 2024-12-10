@@ -84,7 +84,7 @@ class TranslationInferenceBeamSearchSpeculativeBatchedWithoutLeftPads:
 
         self.max_draft_len = 200
         self.min_draft_len = 5
-        drafts_len = max(self.min_draft_len, self.n_speculative_tokens)
+        drafts_len = max(self.min_draft_len, n_speculative_tokens)
         drafts_len = min(drafts_len, self.max_draft_len)
         if drafts_len != n_speculative_tokens:
             print(f"The draft length should be in range [{self.min_draft_len}: {self.max_draft_len}], so it was changed to {drafts_len}")
@@ -330,8 +330,6 @@ class TranslationInferenceBeamSearchSpeculativeBatchedWithoutLeftPads:
             # for each candidate:
             n_accepted, draft_i = n_accepted_in_drafts.topk(1, dim=-1)
             # (n_candidates, n_drafts) -> (n_candidates, 1)
-
-            self.accepted_tokens_num += n_accepted.sum().item()
 
             chosen_drafts = torch.gather(draft_tokens, dim=1,
                                          index=draft_i.unsqueeze(-1).expand(n_candidates, 1, draft_len)).squeeze(1)
