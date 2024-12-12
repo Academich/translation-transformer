@@ -117,11 +117,17 @@ class TranslationInferenceBeamSearch:
         # (examples, beam_width, length) # fin_X [[5,20],[5,20],[5,20],[2,31],[2,31],[2,31]]
         # (b_w * examples, length)
 
+        src_pad_mask = (src_bw == self.model.src_pad_token_i).bool()
+        memory = self.model.encode_src(src_bw, src_pad_mask)    # -> (given_b_size, src_len, emb_dim)
+
         predictions = self.max_len - 1
 
         for i in range(predictions - 1):
-            next_probabilities = torch.log(torch.softmax(self.model(src_bw, y), dim=-1))[:, -1,
-                                 :]  # (bs*b_w, vocab_size)
+            pred_logits = self.model.decode_tgt(y,
+                                    memory,
+                                    memory_pad_mask=src_pad_mask)
+            next_probabilities = torch.log(torch.softmax(pred_logits, dim=-1))[:, -1, :]  # (bs*b_w, vocab_size)
+
             self.model_calls_num += 1
             next_probabilities = next_probabilities.reshape(
                 (-1, self.beam_size, next_probabilities.shape[-1]))  # (examples, b_w, vocab_size)
