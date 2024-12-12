@@ -1,6 +1,7 @@
 import datetime
 from typing import Any
 from timeit import default_timer as timer
+import json
 
 import torch
 from torch import nn
@@ -211,24 +212,28 @@ class VanillaEncoderDecoderTransformerLightning(LightningModule):
     def on_predict_start(self) -> None:
         if self.report_prediction_time:
             self.prediction_start_time = timer()
-
+    
     def on_predict_end(self) -> None:
-        print("Number of model calls:", self.generator.model_calls_num)
-        if self.hparams.generation == "greedy_speculative" or self.hparams.generation == "beam_search_speculative":
-            print("accepted tokens num:", self.generator.accepted_tokens_num)
-            print("acceptance rate:", self.generator.accepted_tokens_num / self.generator.produced_non_pad_tokens)
+        elapsed = datetime.timedelta(seconds=timer() - self.prediction_start_time)
+        report = {
+                "algorithm": self.hparams.generation,
+                "max_len": self.hparams.max_len,
+                "total_seconds": round(elapsed.total_seconds(), 4),
+                "model_calls": self.generator.model_calls_num,
+                "seconds_per_model_call": round(elapsed.total_seconds() / self.generator.model_calls_num, 4)
+            }
+        if self.hparams.generation in ("greedy_speculative", "beam_search_speculative"):
+            report["n_drafts"] = self.hparams.n_drafts
+            report["draft_len"] = self.hparams.n_speculative_tokens
+            report["accepted_tokens"] = self.generator.accepted_tokens_num
+            report["acceptance_rate"] = round(self.generator.accepted_tokens_num / self.generator.produced_non_pad_tokens, 4)
+        report = json.dumps(report)
+
         if self.report_prediction_time:
-            elapsed = datetime.timedelta(seconds=timer() - self.prediction_start_time)
-            print(f"Predict time elapsed: {elapsed}; total seconds: {elapsed.total_seconds()}")
-            print("Decoding:", self.generator)
+            print(report)
             if self.hparams.report_prediction_file is not None:
                 with open(self.hparams.report_prediction_file, "a") as f:
-                    print("Decoding:", self.generator, file=f)
-                    print(f"Predict time elapsed: {elapsed}; total seconds: {elapsed.total_seconds()}", file=f)
-                    print("Number of model calls:", self.generator.model_calls_num, file=f)
-                    if self.hparams.generation == "greedy_speculative" or self.hparams.generation == "beam_search_speculative":
-                        print("accepted tokens:", self.generator.accepted_tokens_num, file=f)
-                        print("acceptance rate:", self.generator.accepted_tokens_num / self.generator.produced_non_pad_tokens, file=f)
+                    print(report, file=f)
                     print(file=f)
 
     def configure_optimizers(self):
