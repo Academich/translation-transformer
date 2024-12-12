@@ -1,0 +1,10 @@
+N#Cc1ccsc1Nc1cc(F)c(F)cc1[N+](=O)[O-]
+COC(=O)Cc1cn(C)c2cc(OCC(C)c3cn(-c4ccc(C(F)(F)F)cc4)nc3C)ccc12
+O=c1ccc2ncc(F)c3c2n1CC3CN1CCC(NCc2cc3c(cn2)OCS3)C(O)C1
+C=C(C)C(=O)Oc1ccc(N2C(=O)C(=C(C)C)C(=C(C)c3cc(-c4ccccc4)sc3C)C2=O)cc1
+OCc1cncc(Cl)c1COC1CCCCO1
+COc1ncc(Nc2ncc(CN3CCN(S(C)(=O)=O)CC3C)cc2-c2nc(C)nc(N)n2)cc1F
+CCCCC(CO)c1ccc(C)cc1C
+Fc1cc(-c2nc(CN3CCCCC3)co2)ccc1OCCCN1CCCCC1
+Cc1ccc(CNc2ccc3c(NCCS(C)=O)cccc3n2)o1
+CCOCCCOc1nsnc1-c1cccnc1

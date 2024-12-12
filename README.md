@@ -22,6 +22,7 @@ pip install tensorboard
 pip install gdown
 pip install -e .
 ```
+If you are using Weights&Biases, run also `pip install wandb`.
 
 ### Data
 
@@ -30,11 +31,8 @@ For single-step retrosynthesis, we used USPTO50k as prepared in the [RSMILES](ht
 
 **Download USPTO MIT mixed:**
 ```bash
-THIS_REPO_PATH=$(pwd) # The full path to this repository 
 gdown https://drive.google.com/drive/folders/1fJ7Hm55IDevIi5Apna7v-rQBQStTH7Yg -O data/MIT_mixed --folder
-cd data/MIT_mixed
-python3 detokenize.py
-cd $THIS_REPO_PATH
+python3 src/detokenize.py --data_dir data/MIT_mixed
 ```
 
 **Download USPTO 50K** and augment it using [RSMILES](https://github.com/otori-bird/retrosynthesis) augmentation.  
@@ -54,6 +52,9 @@ python3 preprocessing/generate_PtoR_data.py -augmentation 1 -processes ${PROCESS
 mv dataset/USPTO_50K_PtoR_aug${AUGMENTATIONS} ${THIS_REPO_PATH}/data # The augmented dataset is now in this repository
 mv dataset/USPTO_50K_PtoR_aug1 ${THIS_REPO_PATH}/data
 cd $THIS_REPO_PATH
+python3 src/detokenize.py --data_dir data/USPTO_50K_PtoR_aug1/test
+python3 src/detokenize.py --data_dir data/USPTO_50K_PtoR_aug${AUGMENTATIONS}/train
+python3 src/detokenize.py --data_dir data/USPTO_50K_PtoR_aug${AUGMENTATIONS}/val
 ```
 
 ### Models
@@ -76,3 +77,19 @@ Download single-step retrosynthesis checkpoints
 mkdir checkpoints/single_step_retrosynthesis
 gdown https://drive.google.com/drive/folders/1v4pKYWlE0qNA-ksa7yX55i7qMeesURON -O checkpoints/single_step_retrosynthesis --folder
 ```
+
+### Inference
+The scripts `scripts/product_prediction.sh` and `scripts/single_step_retrosynthesis.sh` run the models for reaction product prediction and single-step retrosynthesis, respectively.  
+The forward pass of the transformer is implemented in `src/model/lightning_model.py`.  
+The sampling of sequences from the logits predicted by the transformer is implemented in `src/decoding/standard_decoding.py` and `src/decoding/speculative_decoding.py`.  
+The generated sequences are written to CSV files using the `PredictionWriter` callback implemented in `src/callbacks.py`. For example, the script `scripts/product_prediction.sh` loads a checkpoint of the transformer and runs the model on the USPTO MIT mixed test dataset.  
+The generated sequences are then saved to, e.g., `results_product_greedy_speculative/MIT_mixed_greedy_speculative_batched_bs_1_draftlen_10.csv`. 
+
+### Evaluating performance
+The script `src/score_predictions.py` scores the predictions saved in CSV files. It calculates the top-N accuracy and the percentage of invalid SMILES.
+
+Example usage:
+```bash
+python3 src/score_predictions.py -f results_product_greedy_speculative/MIT_mixed_greedy_speculative_batched_bs_1_draftlen_10.csv
+```
+The accuracy is printed to the terminal.
