@@ -1,4 +1,5 @@
 import torch
+from torch.nn.functional import pad
 
 
 def make_drafts(
@@ -27,7 +28,7 @@ def make_drafts(
         draft_len (int): The desired draft length.
         n_drafts (int): The desired number of drafts for every source sequence in the batch.
         min_draft_len (int): The minimum draft length. For example, draft length of zero makes little sense.
-        max_draft_len (int): The maximum draft length. For example, it cannot be greater than the length of the source sequence.
+        max_draft_len (int): The maximum draft length.
         eos_token_idx (int): The index of the end of sentence token.
         pad_token_idx (int): The index of the padding token.
         replace_token_idx (int): The index of the token to replace the service tokens with.
@@ -43,12 +44,19 @@ def make_drafts(
 
     s = src[:, 1:].clone()  # we don't need the bos token
     B, L = s.shape
-    D = min(max(min_draft_len, draft_len), min(max_draft_len, L))  # Adjusted draft length
-    N = min(n_drafts, L - D + 1)  # Adjusted number of drafts
+    N = n_drafts
+    D = min(max(min_draft_len, draft_len), max_draft_len)  # Adjusted draft length
+
+    # If the requested length is greater than the sequence length, we will pad the source more to allow it
+    additional_pads = N + D - L - 1
+    if additional_pads > 0:
+        s = pad(s, (0, additional_pads), "constant", pad_token_idx) # (B, L')
+    # else L' is equal to L
+
     # print(f"{N} drafts of length {D} from {L} tokens")
-    drafts = s.unfold(dimension=1, size=D, step=1)  # (B, L - D + 1, D)
+    drafts = s.unfold(dimension=1, size=D, step=1)  # (B, L' - D + 1, D)
     service_tokens_amount_in_drafts = (drafts == eos_token_idx).logical_or(drafts == pad_token_idx).sum(
-        -1)  # (B, L - D + 1)
+        -1)  # (B, L' - D + 1)
     n_drafts_without_service_tokens = (service_tokens_amount_in_drafts == 0).sum(-1)  # B,
     take_from = torch.maximum(n_drafts_without_service_tokens.view(B, 1), torch.tensor(N, device=s.device))  # (B, 1)
     steps = torch.arange(N, device=s.device)
