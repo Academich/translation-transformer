@@ -42,11 +42,9 @@ class VanillaEncoderDecoderTransformerLightning(LightningModule):
                  beam_size: int = 1,
                  n_best: int = 1,
                  max_len: int = 100,
-                 n_speculative_tokens: int = 0,
-                 nucleus: float = 0.995,
-                 max_num_of_drafts: int = 23,
-                 draft_mode: bool = True,
-                 report_prediction_time: bool = False,
+                 n_drafts: int = 0,
+                 draft_len: int = 0,
+                 report_prediction_time: bool = True,
                  report_prediction_file: str | None = None
                  ):
         super().__init__()
@@ -105,15 +103,16 @@ class VanillaEncoderDecoderTransformerLightning(LightningModule):
                                                             eos_token=self.tgt_eos_token_i)
 
         elif self.hparams.generation == "greedy_speculative":
-            assert self.hparams.n_speculative_tokens > 0, "Number of speculative tokens must be a positive integer."
+            assert self.hparams.draft_len > 0, "Number of speculative tokens must be a positive integer."
             return TranslationInferenceGreedySpeculative(
                 self.model,
                 max_len=self.hparams.max_len,
-                n_speculative_tokens=self.hparams.n_speculative_tokens,
-                max_drafts_num=5,  # TODO remove hardcode
+                draft_len=self.hparams.draft_len,
+                n_drafts=self.hparams.n_drafts,
                 pad_token=self.tgt_pad_token_i,
                 bos_token=self.tgt_bos_token_i,
-                eos_token=self.tgt_eos_token_i
+                eos_token=self.tgt_eos_token_i,
+                replace_token=self.tgt_tokenizer.encoder_dict["c"]
             )
         elif self.hparams.generation == "beam_search_speculative":
             return TranslationInferenceBeamSearchSpeculativeBatchedWithoutLeftPads(
@@ -121,8 +120,8 @@ class VanillaEncoderDecoderTransformerLightning(LightningModule):
                 vocab_size=self.tgt_vocab_size,
                 max_len=self.hparams.max_len,
                 n_best=self.hparams.n_best,
-                n_speculative_tokens=self.hparams.n_speculative_tokens,
-                max_num_of_drafts=self.hparams.max_num_of_drafts,
+                draft_len=self.hparams.draft_len,
+                n_drafts=self.hparams.n_drafts,
                 pad_token=self.tgt_pad_token_i,
                 bos_token=self.tgt_bos_token_i,
                 eos_token=self.tgt_eos_token_i,
@@ -217,6 +216,8 @@ class VanillaEncoderDecoderTransformerLightning(LightningModule):
         elapsed = datetime.timedelta(seconds=timer() - self.prediction_start_time)
         report = {
                 "algorithm": self.hparams.generation,
+                "batch_size": self.trainer.datamodule.batch_size,
+                "tgt_test_path": self.trainer.datamodule.tgt_test_path,
                 "max_len": self.hparams.max_len,
                 "total_seconds": round(elapsed.total_seconds(), 4),
                 "model_calls": self.generator.model_calls_num,
@@ -224,9 +225,10 @@ class VanillaEncoderDecoderTransformerLightning(LightningModule):
             }
         if self.hparams.generation in ("greedy_speculative", "beam_search_speculative"):
             report["n_drafts"] = self.hparams.n_drafts
-            report["draft_len"] = self.hparams.n_speculative_tokens
-            report["accepted_tokens"] = self.generator.accepted_tokens_num
-            report["acceptance_rate"] = round(self.generator.accepted_tokens_num / self.generator.produced_non_pad_tokens, 4)
+            report["draft_len"] = self.hparams.draft_len
+            if self.hparams.generation == "beam_search_speculative":
+                report["accepted_tokens"] = self.generator.accepted_tokens_num
+                report["acceptance_rate"] = round(self.generator.accepted_tokens_num / self.generator.produced_non_pad_tokens, 4)
         report = json.dumps(report)
 
         if self.report_prediction_time:
@@ -234,7 +236,6 @@ class VanillaEncoderDecoderTransformerLightning(LightningModule):
             if self.hparams.report_prediction_file is not None:
                 with open(self.hparams.report_prediction_file, "a") as f:
                     print(report, file=f)
-                    print(file=f)
 
     def configure_optimizers(self):
         optimizer = optim.Adam(self.parameters(),
