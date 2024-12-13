@@ -2,30 +2,28 @@ CKPT_DIR=checkpoints/single_step_retrosynthesis
 
 CONFIG=configs/cfg_standard_single_step_retrosyn.yaml
 
-TEST_DATA_PATH=data/USPTO_50K_PtoR_aug1/test
+DATA=USPTO_50K_PtoR_aug1
+TEST_DATA_PATH=data/${DATA}/test
 
 CKPT='step=337241-v_sq_acc=0.513-v_tk_acc=0.9904-v_l=0.0366.ckpt'
 CKPT_PATH=${CKPT_DIR}/${CKPT}
 VOCAB_PATH=${CKPT_DIR}/vocab.json
 
-function run_prediction() {
-  local OUTPUT_DIR=${1:-}
-  local GEN=${2:-}
-  local BS=${3:-1} # Batch size
-  local NBEST=${4:-5} # Number of best sequences
-  local N_SPEC_TOK=${5:-10} # Draft sequence length
-  local ATTEMPT_NUM=${6:-}
 
-  local ATTEMPT=""
-  if [ -n "${ATTEMPT_NUM}" ]; then
-    ATTEMPT="_attempt_${ATTEMPT_NUM}"
+# Function to run greedy decoding
+function run_greedy() {
+  local OUTPUT_DIR=${1:-} # Directory for the results and reports
+  local BS=${2:-1} # Batch size
+  local GPU=${3:-1}
+
+  local DEVICE="--trainer.accelerator cpu --trainer.devices 1"
+  if [ -n "${GPU}" ]; then
+    DEVICE="--trainer.accelerator gpu --trainer.devices [${GPU}]"
   fi
 
   local MAX_LEN=200
-  local NUCLEUS=20.
-  local MAX_NUM_OF_DRAFTS=23
-  local DRAFT_MODE=true
-  local OUTPUT_FILE=${TEST_DATA_PATH}_${GEN}_bs_${BS}_nbest_${NBEST}_draftlen_${N_SPEC_TOK}${ATTEMPT}.csv
+  local OUTPUT_FILE=${DATA}_greedy_batch_${BS}.csv
+  echo ${OUTPUT_FILE}
 
   python3 main.py predict -c ${CONFIG} \
           --ckpt_path ${CKPT_PATH} \
@@ -33,26 +31,141 @@ function run_prediction() {
           --data.tgt_test_path ${TEST_DATA_PATH}/tgt-test.txt \
           --data.vocab_path ${VOCAB_PATH} \
           --model.report_prediction_time true \
-          --model.report_prediction_file ${OUTPUT_DIR}/time.txt \
+          --model.report_prediction_file ${OUTPUT_DIR}/report.txt \
           --data.batch_size ${BS} \
-          --model.generation ${GEN} \
-          --model.n_speculative_tokens ${N_SPEC_TOK} \
-          --model.beam_size ${NBEST} \
-          --model.n_best ${NBEST} \
-          --model.nucleus ${NUCLEUS} \
+          --model.generation greedy \
           --model.max_len ${MAX_LEN} \
-          --model.max_num_of_drafts ${MAX_NUM_OF_DRAFTS} \
-          --model.draft_mode ${DRAFT_MODE} \
           --trainer.callbacks+=callbacks.PredictionWriter \
-          --trainer.callbacks.output_dir=${OUTPUT_DIR}/${OUTPUT_FILE}
+          --trainer.callbacks.output_dir=${OUTPUT_DIR}/${OUTPUT_FILE} ${DEVICE}
+}
 
+# Function to run speculative greedy decoding
+function run_greedy_speculative() {
+  local OUTPUT_DIR=${1:-} # Directory for the results and reports
+  local BS=${2:-1} # Batch size
+  local DRAFT_LEN=${3:-10} # Draft sequence length
+  local N_DRAFTS=${4:-23} # Maximum number of parallel drafts 
+  local GPU=${5:-1}
+
+  local DEVICE="--trainer.accelerator cpu --trainer.devices 1"
+  if [ -n "${GPU}" ]; then
+    DEVICE="--trainer.accelerator gpu --trainer.devices [${GPU}]"
+  fi
+
+  local MAX_LEN=200
+  local OUTPUT_FILE=${DATA}_greedy_speculative_batch_${BS}_dlen_${DRAFT_LEN}_${N_DRAFTS}_drafts.csv
+  echo ${OUTPUT_FILE}
+
+  python3 main.py predict -c ${CONFIG} \
+          --ckpt_path ${CKPT_PATH} \
+          --data.src_test_path ${TEST_DATA_PATH}/src-test.txt \
+          --data.tgt_test_path ${TEST_DATA_PATH}/tgt-test.txt \
+          --data.vocab_path ${VOCAB_PATH} \
+          --model.report_prediction_time true \
+          --model.report_prediction_file ${OUTPUT_DIR}/report.txt \
+          --data.batch_size ${BS} \
+          --model.generation greedy_speculative \
+          --model.draft_len ${DRAFT_LEN} \
+          --model.n_drafts ${N_DRAFTS} \
+          --model.max_len ${MAX_LEN} \
+          --trainer.callbacks+=callbacks.PredictionWriter \
+          --trainer.callbacks.output_dir=${OUTPUT_DIR}/${OUTPUT_FILE} ${DEVICE}
+}
+
+
+# Function to run beam search decoding
+function run_beam_search() {
+  local OUTPUT_DIR=${1:-} # Directory for the results and reports
+  local BS=${2:-1} # Batch size
+  local NBEST=${3:-5} # Number of best sequences
+  local GPU=${4:-1}
+
+  local DEVICE="--trainer.accelerator cpu --trainer.devices 1"
+  if [ -n "${GPU}" ]; then
+    DEVICE="--trainer.accelerator gpu --trainer.devices [${GPU}]"
+  fi
+
+  local MAX_LEN=200
+  local OUTPUT_FILE=${DATA}_beam_search_batch_${BS}_nbest_${NBEST}.csv
+  echo ${OUTPUT_FILE}
+
+  python3 main.py predict -c ${CONFIG} \
+          --ckpt_path ${CKPT_PATH} \
+          --data.src_test_path ${TEST_DATA_PATH}/src-test.txt \
+          --data.tgt_test_path ${TEST_DATA_PATH}/tgt-test.txt \
+          --data.vocab_path ${VOCAB_PATH} \
+          --model.report_prediction_time true \
+          --model.report_prediction_file ${OUTPUT_DIR}/report.txt \
+          --data.batch_size ${BS} \
+          --model.generation beam_search \
+          --model.n_best ${NBEST} \
+          --model.max_len ${MAX_LEN} \
+          --trainer.callbacks+=callbacks.PredictionWriter \
+          --trainer.callbacks.output_dir=${OUTPUT_DIR}/${OUTPUT_FILE} ${DEVICE}
+}
+
+
+# Function to run speculative beam search decoding
+function run_speculative_beam_search() {
+  local OUTPUT_DIR=${1:-} # Directory for the results and reports
+  local BS=${2:-1} # Batch size
+  local NBEST=${3:-5} # Number of best sequences
+  local DRAFT_LEN=${4:-10} # Draft sequence length
+  local N_DRAFTS=${5:-23} # Maximum number of parallel drafts 
+  local GPU=${6:-1}
+
+  local DEVICE="--trainer.accelerator cpu --trainer.devices 1"
+  if [ -n "${GPU}" ]; then
+    DEVICE="--trainer.accelerator gpu --trainer.devices [${GPU}]"
+  fi
+
+  local MAX_LEN=200
+  local OUTPUT_FILE=${DATA}_beam_search_speculative_batch_${BS}_nbest_${NBEST}_dlen_${DRAFT_LEN}_${N_DRAFTS}_drafts.csv
+  echo ${OUTPUT_FILE}
+
+  python3 main.py predict -c ${CONFIG} \
+          --ckpt_path ${CKPT_PATH} \
+          --data.src_test_path ${TEST_DATA_PATH}/src-test.txt \
+          --data.tgt_test_path ${TEST_DATA_PATH}/tgt-test.txt \
+          --data.vocab_path ${VOCAB_PATH} \
+          --model.report_prediction_time true \
+          --model.report_prediction_file ${OUTPUT_DIR}/report.txt \
+          --data.batch_size ${BS} \
+          --model.generation beam_search_speculative \
+          --model.draft_len ${DRAFT_LEN} \
+          --model.n_best ${NBEST} \
+          --model.max_len ${MAX_LEN} \
+          --model.n_drafts ${N_DRAFTS} \
+          --trainer.callbacks+=callbacks.PredictionWriter \
+          --trainer.callbacks.output_dir=${OUTPUT_DIR}/${OUTPUT_FILE} ${DEVICE}
 }
 
 # Beam search
-BATCH_SIZE=1
-METHOD=beam_search
-N_BEST=10
-run_prediction results_retrosynthesis_${METHOD} ${METHOD} ${BATCH_SIZE} ${N_BEST}
+BATCH_SIZE=8
+
+# run_greedy results_retrosynthesis_greedy_500rxn_bs${BATCH_SIZE}_gpu6 ${BATCH_SIZE}
+# METHOD=beam_search
+# N_BEST=5
+for n in 2 3 5 7; #9 10 13 15 23;
+do
+  for d in 5 7 9 10 11 12 14 17 20;
+  do
+     run_speculative_beam_search results_retrosynthesis_sbs_like_greedy_nucleus_100_500rxn_bs${BATCH_SIZE}_gpu1 ${BATCH_SIZE} 1 $d $n
+  done
+done
+
+
+# # Speculative beam search
+# for l in 10;
+# do
+#     for d in 3 5 10 15 25;
+#     do
+#             for i in 1 2 3;
+#             do
+#               run_speculative_beam_search results_retrosynthesis_sbs_linspace_drafting ${BATCH_SIZE} ${N_BEST} ${l} ${d}
+#             done
+#     done
+# done
 
 # Speculative beam search
 METHOD=beam_search_speculative
