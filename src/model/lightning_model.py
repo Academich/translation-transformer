@@ -217,7 +217,7 @@ class VanillaEncoderDecoderTransformerLightning(LightningModule):
         report = {
                 "algorithm": self.hparams.generation,
                 "batch_size": self.trainer.datamodule.batch_size,
-                "tgt_test_path": self.trainer.datamodule.tgt_test_path,
+                "tgt_test_path": str(self.trainer.datamodule.tgt_test_path),
                 "max_len": self.hparams.max_len,
                 "total_seconds": round(elapsed.total_seconds(), 4),
                 "model_calls": self.generator.model_calls_num,
