@@ -87,8 +87,8 @@ data:
     tgt_test_path: data/USPTO_50K_PtoR_aug1/tgt-test.txt
     batch_size: 32
     num_workers: 4
-    persistent_workers: false
-    pin_memory: false
+    persistent_workers: true
+    pin_memory: true
     shuffle_train: true
 model:
   class_path: model.VanillaEncoderDecoderTransformerLightning

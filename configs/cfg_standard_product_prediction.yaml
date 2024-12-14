@@ -81,8 +81,8 @@ data:
     data_dir: data/MIT_mixed
     batch_size: 32
     num_workers: 4
-    persistent_workers: false
-    pin_memory: false
+    persistent_workers: true
+    pin_memory: true
     shuffle_train: true
 model:
   class_path: model.VanillaEncoderDecoderTransformerLightning
