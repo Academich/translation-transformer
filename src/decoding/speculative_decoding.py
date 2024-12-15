@@ -1226,10 +1226,15 @@ class TranslationInferenceGreedySpeculativeNoLeftPads:
         memory_inflated = torch.repeat_interleave(memory, N, dim=0) # (B*N, Ls, E)
         src_pad_mask_inflated = torch.repeat_interleave(src_pad_mask, N, dim=0) # (B*N, Ls)
 
+        # Indices of the sequences in the batch. Needed to filter out the finished sequences
+        unfinished_query_batch_indices = torch.arange(B).type_as(src) # (B,)
+
         generated_tokens = torch.full((B, 1), self.bos_token).type_as(src).long() # (B, 1)
         
         # Index of the last non-pad token in the generated sequence
         front_index = torch.zeros_like(generated_tokens) # (B, 1)
+
+        finished_predictions = torch.full((B, self.max_len), self.pad_token).type_as(src)
 
         iters = 0
         while generated_tokens.size(1) < self.max_len:  # while gnrtd_len < self.max_len
@@ -1296,5 +1301,27 @@ class TranslationInferenceGreedySpeculativeNoLeftPads:
             generated_tokens = generated_tokens_padded.scatter(dim=1, index=insertion_indices, src=chosen_truncated_to_accepted)
             front_index = front_index + n_accepted + 1
 
-        return generated_tokens.unsqueeze(1)
+            # Put away the sequences that reached the EOS token. It speeds up the decoding
+            sequence_finished = (generated_tokens == self.eos_token).sum(-1).bool() # (B,)
+            sequence_indices_finised = sequence_finished.nonzero().ravel()
+            if sequence_indices_finised.nelement() > 0: # if there are finished sequences
+                sequence_to_continue = ~sequence_finished
+                sequence_finished_inflated = torch.repeat_interleave(sequence_finished, N, dim=0) # (B*N,)
+                sequence_to_continue_inflated = ~sequence_finished_inflated # (B*N,)
+                query_batch_indices_finished = unfinished_query_batch_indices[sequence_finished]
+                finished_predictions[query_batch_indices_finished, :] = generated_tokens[sequence_indices_finised]
+
+                unfinished_query_batch_indices = unfinished_query_batch_indices[sequence_to_continue]
+                generated_tokens = generated_tokens[sequence_to_continue]
+                draft_tokens = draft_tokens[sequence_to_continue]
+                memory = memory[sequence_to_continue]
+                src_pad_mask = src_pad_mask[sequence_to_continue]
+                memory_inflated = memory_inflated[sequence_to_continue_inflated]
+                src_pad_mask_inflated = src_pad_mask_inflated[sequence_to_continue_inflated]
+
+            if unfinished_query_batch_indices.nelement() == 0:
+                break
+
+        return finished_predictions.unsqueeze(1)
+
 
