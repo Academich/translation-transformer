@@ -1153,3 +1153,148 @@ class TranslationInferenceGreedySpeculativeUnbatched:
             result.append(generated_tokens.squeeze(0))
         return pad_sequence(result, padding_value=self.pad_token, batch_first=True).unsqueeze(1)
 
+
+class TranslationInferenceGreedySpeculativeNoLeftPads:
+    """
+    Speculative greedy decoding that supports input batch sizes larger than 1.
+    """
+
+    def __init__(self,
+                 model,  # TranslationModel
+                 max_len: int,
+                 draft_len: int,
+                 n_drafts: int,
+                 pad_token: int,
+                 bos_token: int,
+                 eos_token: int,
+                 replace_token: int) -> None:
+        self.model = model
+        self.max_len = max_len
+        self.pad_token = pad_token
+        self.bos_token = bos_token
+        self.eos_token = eos_token
+        self.replace_token = replace_token
+
+        self.draft_len = draft_len
+        self.n_drafts = n_drafts
+
+        self.accepted_tokens_num = 0
+        self.model_calls_num = 0
+
+
+    def __str__(self):
+        return f"Greedy speculative decoding (draft_len={self.draft_len}, n_drafts={self.n_drafts}, max_len={self.max_len})"
+
+    def generate(self, src: 'torch.LongTensor') -> 'torch.LongTensor':
+        # TODO crashes at the end + does not filter out finished sequences
+        """
+        Generate the predicting for a batch of source sequences.
+
+        B - batch size
+        Ls - source sequence length
+        Lg - generated sequence length
+        N - number of drafts
+        D - draft length
+        E - embedding dimensionality
+        V - vocabulary size
+        Args:
+            src: (B, Ls) - source sequences
+        Returns:
+            (B, 1, Lg) - predicted sequences
+        """
+        N, D = self.n_drafts, self.draft_len
+        B, Ls = src.size()
+        # Encode the source and cache the source embeddings to be reused multiple times
+        src_pad_mask = (src == self.model.src_pad_token_i).bool() # (B, Ls)
+        memory = self.model.encode_src(src, src_pad_mask) # (B, Ls, E)
+
+        draft_tokens = make_drafts(
+            src, 
+            draft_len=self.draft_len, 
+            n_drafts=self.n_drafts, 
+            min_draft_len=1, 
+            max_draft_len=self.max_len, 
+            eos_token_idx=self.eos_token, 
+            pad_token_idx=self.pad_token, 
+            replace_token_idx=self.replace_token
+        ) # (B, N, D)
+        assert draft_tokens.size(1) == N
+        print("DRAFT TOKENS")
+        print(draft_tokens)
+
+        effective_batch_size = B * N
+        memory_inflated = torch.repeat_interleave(memory, N, dim=0) # (B*N, Ls, E)
+        src_pad_mask_inflated = torch.repeat_interleave(src_pad_mask, N, dim=0) # (B*N, Ls)
+
+        generated_tokens = torch.full((B, 1), self.bos_token).type_as(src).long() # (B, 1)
+        
+        # Index of the last non-pad token in the generated sequence
+        front_index = torch.zeros_like(generated_tokens) # (B, 1)
+
+        iters = 0
+        while generated_tokens.size(1) < self.max_len:  # while gnrtd_len < self.max_len
+            iters += 1
+            print(f"Iteration {iters}")
+            print("Generated tokens:")
+            print(generated_tokens)
+            print()
+
+            generated_tokens_present_pad_num =((generated_tokens == self.pad_token).sum(0) == B).sum() # (1,)
+            generated_tokens_padded = pad(generated_tokens, 
+                (0, D + 1 - generated_tokens_present_pad_num),
+                "constant", 
+                value=self.pad_token
+            ) # (B, Lg + D + 1)
+
+            generated_tokens_padded_inflated = torch.repeat_interleave(generated_tokens_padded[:, :-1], N, dim=0) # (B*N, Lg + D)
+            front_index_inflated = torch.repeat_interleave(front_index, N, dim=0) # (B*N, 1)
+
+            insertion_indices = front_index_inflated + torch.arange(D) + 1 # (B*N, D)
+
+            # Concatenate the already generated sequences with the corresponding draft sequences
+            drafted_seqs = generated_tokens_padded_inflated.scatter(
+                dim=1, 
+                index=insertion_indices, 
+                src=draft_tokens.view(effective_batch_size, -1)
+            ) # (B*N, Lg + D)
+            print("DRAFTED SEQS")
+            print(drafted_seqs)
+
+            # Run the decoder and sample from the predicted distributions
+            pred_logits = self.model.decode_tgt(drafted_seqs,
+                                memory_inflated,
+                                memory_pad_mask=src_pad_mask_inflated) # (B*N, Lg + D, V)
+            self.model_calls_num += 1
+            pred_tokens = torch.argmax(pred_logits, dim=2) # (B*N, Lg + D)
+            print("PRED TOKENS")
+            print(pred_tokens)
+
+            # Consider only the tokens predicted for the draft
+            retrieval_indices = front_index_inflated + torch.arange(D + 1)
+            pred_tokens =pred_tokens.gather(dim=1, index=retrieval_indices) # (B*N, D + 1)
+            
+            # Find the drafts with the most accepted tokens
+            verification = draft_tokens.view(effective_batch_size, D) == pred_tokens[:, :-1] # (B*N, D)
+            _range = verification.cumsum(-1)
+            accepted_in_drafts = (torch.arange(1, verification.size(1) + 1).type_as(_range) == _range) # (B*N, D)
+            n_accepted_in_drafts = accepted_in_drafts.sum(-1)
+            n_accepted_in_drafts = n_accepted_in_drafts.view(B, N)
+            n_accepted_in_drafts = n_accepted_in_drafts.topk(1, -1)
+            draft_i = n_accepted_in_drafts.indices
+            n_accepted = n_accepted_in_drafts.values
+
+            # Extract the best draft for every sequence in the batch
+            pred_tokens = pred_tokens.view(B, N, -1)
+            chosen = torch.gather(pred_tokens, 1, draft_i.unsqueeze(-1).expand(B, 1, D + 1)).squeeze(1)
+
+            # Mask out the tokens that were not accepted
+            decline_pred_tokens = torch.arange(D + 1).type_as(n_accepted) > n_accepted
+            chosen_truncated_to_accepted = chosen.masked_fill(decline_pred_tokens, self.pad_token)
+
+            # Insert the newly generated tokens into the entire generated sequence at the correct positions
+            insertion_indices = front_index + torch.arange(D + 1) + 1
+            generated_tokens = generated_tokens_padded.scatter(dim=1, index=insertion_indices, src=chosen_truncated_to_accepted)
+            front_index = front_index + n_accepted + 1
+
+        return generated_tokens.unsqueeze(1)
+
