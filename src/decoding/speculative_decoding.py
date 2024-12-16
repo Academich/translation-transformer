@@ -1186,7 +1186,6 @@ class TranslationInferenceGreedySpeculativeNoLeftPads:
         return f"Greedy speculative decoding (draft_len={self.draft_len}, n_drafts={self.n_drafts}, max_len={self.max_len})"
 
     def generate(self, src: 'torch.LongTensor') -> 'torch.LongTensor':
-        # TODO crashes at the end + does not filter out finished sequences
         """
         Generate the predicting for a batch of source sequences.
 
@@ -1197,6 +1196,7 @@ class TranslationInferenceGreedySpeculativeNoLeftPads:
         D - draft length
         E - embedding dimensionality
         V - vocabulary size
+        Bc - current batch size (less or equal to B)
         Args:
             src: (B, Ls) - source sequences
         Returns:
@@ -1239,12 +1239,13 @@ class TranslationInferenceGreedySpeculativeNoLeftPads:
         iters = 0
         while generated_tokens.size(1) < self.max_len:  # while gnrtd_len < self.max_len
             iters += 1
+            Bc = unfinished_query_batch_indices.nelement()
             print(f"Iteration {iters}")
             print("Generated tokens:")
             print(generated_tokens)
             print()
 
-            generated_tokens_present_pad_num =((generated_tokens == self.pad_token).sum(0) == B).sum() # (1,)
+            generated_tokens_present_pad_num = ((generated_tokens == self.pad_token).sum(0) == Bc).sum()  # (1,)
             generated_tokens_padded = pad(generated_tokens, 
                 (0, D + 1 - generated_tokens_present_pad_num),
                 "constant", 
@@ -1257,10 +1258,11 @@ class TranslationInferenceGreedySpeculativeNoLeftPads:
             insertion_indices = front_index_inflated + torch.arange(D) + 1 # (B*N, D)
 
             # Concatenate the already generated sequences with the corresponding draft sequences
+            draft_tokens_effective_batch_size = draft_tokens.view(draft_tokens.size(0) * draft_tokens.size(1), draft_tokens.size(2))
             drafted_seqs = generated_tokens_padded_inflated.scatter(
                 dim=1, 
                 index=insertion_indices, 
-                src=draft_tokens.view(effective_batch_size, -1)
+                src=draft_tokens_effective_batch_size
             ) # (B*N, Lg + D)
             print("DRAFTED SEQS")
             print(drafted_seqs)
@@ -1279,18 +1281,18 @@ class TranslationInferenceGreedySpeculativeNoLeftPads:
             pred_tokens =pred_tokens.gather(dim=1, index=retrieval_indices) # (B*N, D + 1)
             
             # Find the drafts with the most accepted tokens
-            verification = draft_tokens.view(effective_batch_size, D) == pred_tokens[:, :-1] # (B*N, D)
+            verification = draft_tokens_effective_batch_size == pred_tokens[:, :-1]  # (B*N, D)
             _range = verification.cumsum(-1)
             accepted_in_drafts = (torch.arange(1, verification.size(1) + 1).type_as(_range) == _range) # (B*N, D)
             n_accepted_in_drafts = accepted_in_drafts.sum(-1)
-            n_accepted_in_drafts = n_accepted_in_drafts.view(B, N)
+            n_accepted_in_drafts = n_accepted_in_drafts.view(Bc, N)
             n_accepted_in_drafts = n_accepted_in_drafts.topk(1, -1)
             draft_i = n_accepted_in_drafts.indices
             n_accepted = n_accepted_in_drafts.values
 
             # Extract the best draft for every sequence in the batch
-            pred_tokens = pred_tokens.view(B, N, -1)
-            chosen = torch.gather(pred_tokens, 1, draft_i.unsqueeze(-1).expand(B, 1, D + 1)).squeeze(1)
+            pred_tokens = pred_tokens.view(Bc, N, -1)
+            chosen = torch.gather(pred_tokens, 1, draft_i.unsqueeze(-1).expand(Bc, 1, D + 1)).squeeze(1)
 
             # Mask out the tokens that were not accepted
             decline_pred_tokens = torch.arange(D + 1).type_as(n_accepted) > n_accepted
@@ -1309,10 +1311,11 @@ class TranslationInferenceGreedySpeculativeNoLeftPads:
                 sequence_finished_inflated = torch.repeat_interleave(sequence_finished, N, dim=0) # (B*N,)
                 sequence_to_continue_inflated = ~sequence_finished_inflated # (B*N,)
                 query_batch_indices_finished = unfinished_query_batch_indices[sequence_finished]
-                finished_predictions[query_batch_indices_finished, :] = generated_tokens[sequence_indices_finised]
+                finished_predictions[query_batch_indices_finished, :generated_tokens.size(1)] = generated_tokens[sequence_indices_finised]
 
                 unfinished_query_batch_indices = unfinished_query_batch_indices[sequence_to_continue]
                 generated_tokens = generated_tokens[sequence_to_continue]
+                front_index = front_index[sequence_to_continue]
                 draft_tokens = draft_tokens[sequence_to_continue]
                 memory = memory[sequence_to_continue]
                 src_pad_mask = src_pad_mask[sequence_to_continue]
