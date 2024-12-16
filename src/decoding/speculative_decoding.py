@@ -1,6 +1,7 @@
 import torch
 
 from torch.nn.utils.rnn import pad_sequence
+from torch.nn.functional import pad
 from collections import defaultdict
 
 from utils.drafting import make_drafts
@@ -1219,8 +1220,6 @@ class TranslationInferenceGreedySpeculativeNoLeftPads:
             replace_token_idx=self.replace_token
         ) # (B, N, D)
         assert draft_tokens.size(1) == N
-        print("DRAFT TOKENS")
-        print(draft_tokens)
 
         effective_batch_size = B * N
         memory_inflated = torch.repeat_interleave(memory, N, dim=0) # (B*N, Ls, E)
@@ -1240,10 +1239,6 @@ class TranslationInferenceGreedySpeculativeNoLeftPads:
         while generated_tokens.size(1) < self.max_len:  # while gnrtd_len < self.max_len
             iters += 1
             Bc = unfinished_query_batch_indices.nelement()
-            print(f"Iteration {iters}")
-            print("Generated tokens:")
-            print(generated_tokens)
-            print()
 
             generated_tokens_present_pad_num = ((generated_tokens == self.pad_token).sum(0) == Bc).sum()  # (1,)
             generated_tokens_padded = pad(generated_tokens, 
@@ -1264,8 +1259,6 @@ class TranslationInferenceGreedySpeculativeNoLeftPads:
                 index=insertion_indices, 
                 src=draft_tokens_effective_batch_size
             ) # (B*N, Lg + D)
-            print("DRAFTED SEQS")
-            print(drafted_seqs)
 
             # Run the decoder and sample from the predicted distributions
             pred_logits = self.model.decode_tgt(drafted_seqs,
@@ -1273,8 +1266,6 @@ class TranslationInferenceGreedySpeculativeNoLeftPads:
                                 memory_pad_mask=src_pad_mask_inflated) # (B*N, Lg + D, V)
             self.model_calls_num += 1
             pred_tokens = torch.argmax(pred_logits, dim=2) # (B*N, Lg + D)
-            print("PRED TOKENS")
-            print(pred_tokens)
 
             # Consider only the tokens predicted for the draft
             retrieval_indices = front_index_inflated + torch.arange(D + 1)
