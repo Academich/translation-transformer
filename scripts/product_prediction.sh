@@ -14,6 +14,7 @@ function run_greedy() {
   local OUTPUT_DIR=${1:-} # Directory for the results and reports
   local BS=${2:-1} # Batch size
   local GPU=${3:-1}
+  local SAVE_PREDICTIONS=${4:-false} # Whether to save predictions to disk. Slows down the run.
 
   local DEVICE="--trainer.accelerator cpu --trainer.devices 1"
   if [ -n "${GPU}" ]; then
@@ -22,7 +23,11 @@ function run_greedy() {
 
   local MAX_LEN=200
   local OUTPUT_FILE=${DATA}_greedy_batch_${BS}.csv
+  local PREDICTION_WRITER=""
+  if [ "${SAVE_PREDICTIONS}" = "true" ]; then
+    PREDICTION_WRITER="--trainer.callbacks+=callbacks.PredictionWriter --trainer.callbacks.output_dir=${OUTPUT_DIR}/${OUTPUT_FILE}"
   echo ${OUTPUT_FILE}
+  fi
 
   python3 main.py predict -c ${CONFIG} \
           --ckpt_path ${CKPT_PATH} \
@@ -32,9 +37,7 @@ function run_greedy() {
           --model.report_prediction_file ${OUTPUT_DIR}/report.txt \
           --data.batch_size ${BS} \
           --model.generation greedy \
-          --model.max_len ${MAX_LEN} \
-          --trainer.callbacks+=callbacks.PredictionWriter \
-          --trainer.callbacks.output_dir=${OUTPUT_DIR}/${OUTPUT_FILE} ${DEVICE}
+          --model.max_len ${MAX_LEN} ${PREDICTION_WRITER} ${DEVICE}
 }
 
 
@@ -45,6 +48,7 @@ function run_greedy_speculative() {
   local DRAFT_LEN=${3:-10} # Draft sequence length
   local N_DRAFTS=${4:-23} # Maximum number of parallel drafts 
   local GPU=${5:-1}
+  local SAVE_PREDICTIONS=${6:-false} # Whether to save predictions to disk. Slows down the run.
 
   local DEVICE="--trainer.accelerator cpu --trainer.devices 1"
   if [ -n "${GPU}" ]; then
@@ -53,7 +57,11 @@ function run_greedy_speculative() {
 
   local MAX_LEN=200
   local OUTPUT_FILE=${DATA}_greedy_speculative_batch_${BS}_dlen_${DRAFT_LEN}_${N_DRAFTS}_drafts.csv
+  local PREDICTION_WRITER=""
+  if [ "${SAVE_PREDICTIONS}" = "true" ]; then
+    PREDICTION_WRITER="--trainer.callbacks+=callbacks.PredictionWriter --trainer.callbacks.output_dir=${OUTPUT_DIR}/${OUTPUT_FILE}"
   echo ${OUTPUT_FILE}
+  fi
 
   python3 main.py predict -c ${CONFIG} \
           --ckpt_path ${CKPT_PATH} \
@@ -65,9 +73,7 @@ function run_greedy_speculative() {
           --model.generation greedy_speculative \
           --model.draft_len ${DRAFT_LEN} \
           --model.n_drafts ${N_DRAFTS} \
-          --model.max_len ${MAX_LEN} \
-          --trainer.callbacks+=callbacks.PredictionWriter \
-          --trainer.callbacks.output_dir=${OUTPUT_DIR}/${OUTPUT_FILE} ${DEVICE}
+          --model.max_len ${MAX_LEN} ${PREDICTION_WRITER} ${DEVICE}
 }
 
 # Function to run beam search decoding
@@ -76,15 +82,21 @@ function run_beam_search() {
   local BS=${2:-1} # Batch size
   local NBEST=${3:-5} # Number of best sequences
   local GPU=${4:-1}
+  local SAVE_PREDICTIONS=${5:-false} # Whether to save predictions to disk. Slows down the run.
 
   local DEVICE="--trainer.accelerator cpu --trainer.devices 1"
   if [ -n "${GPU}" ]; then
     DEVICE="--trainer.accelerator gpu --trainer.devices [${GPU}]"
   fi
 
-  local MAX_LEN=200
   local OUTPUT_FILE=${DATA}_beam_search_batch_${BS}_nbest_${NBEST}.csv
+  local PREDICTION_WRITER=""
+  if [ "${SAVE_PREDICTIONS}" = "true" ]; then
+    PREDICTION_WRITER="--trainer.callbacks+=callbacks.PredictionWriter --trainer.callbacks.output_dir=${OUTPUT_DIR}/${OUTPUT_FILE}"
   echo ${OUTPUT_FILE}
+  fi
+
+  local MAX_LEN=200
 
   python3 main.py predict -c ${CONFIG} \
           --ckpt_path ${CKPT_PATH} \
@@ -95,9 +107,7 @@ function run_beam_search() {
           --data.batch_size ${BS} \
           --model.generation beam_search \
           --model.n_best ${NBEST} \
-          --model.max_len ${MAX_LEN} \
-          --trainer.callbacks+=callbacks.PredictionWriter \
-          --trainer.callbacks.output_dir=${OUTPUT_DIR}/${OUTPUT_FILE} ${DEVICE}
+          --model.max_len ${MAX_LEN} ${PREDICTION_WRITER} ${DEVICE}
 }
 
 
@@ -109,15 +119,21 @@ function run_speculative_beam_search() {
   local DRAFT_LEN=${4:-10} # Draft sequence length
   local N_DRAFTS=${5:-23} # Maximum number of parallel drafts 
   local GPU=${6:-1}
+  local SAVE_PREDICTIONS=${7:-false} # Whether to save predictions to disk. Slows down the run.
 
   local DEVICE="--trainer.accelerator cpu --trainer.devices 1"
   if [ -n "${GPU}" ]; then
     DEVICE="--trainer.accelerator gpu --trainer.devices [${GPU}]"
   fi
 
-  local MAX_LEN=200
   local OUTPUT_FILE=${DATA}_beam_search_speculative_batch_${BS}_nbest_${NBEST}_dlen_${DRAFT_LEN}_${N_DRAFTS}_drafts.csv
+  local PREDICTION_WRITER=""
+  if [ "${SAVE_PREDICTIONS}" = "true" ]; then
+    PREDICTION_WRITER="--trainer.callbacks+=callbacks.PredictionWriter --trainer.callbacks.output_dir=${OUTPUT_DIR}/${OUTPUT_FILE}"
   echo ${OUTPUT_FILE}
+  fi
+
+  local MAX_LEN=200
 
   python3 main.py predict -c ${CONFIG} \
           --ckpt_path ${CKPT_PATH} \
@@ -130,13 +146,17 @@ function run_speculative_beam_search() {
           --model.draft_len ${DRAFT_LEN} \
           --model.n_best ${NBEST} \
           --model.max_len ${MAX_LEN} \
-          --model.n_drafts ${N_DRAFTS} \
-          --trainer.callbacks+=callbacks.PredictionWriter \
-          --trainer.callbacks.output_dir=${OUTPUT_DIR}/${OUTPUT_FILE} ${DEVICE}
+          --model.n_drafts ${N_DRAFTS} ${PREDICTION_WRITER} ${DEVICE}
 }
 
 
-GPU=7
+GPU=4
+BATCH_SIZE=32
+DRAFT_LEN=5
+N_DRAFTS=3
+SAVE_PREDICTIONS=false
+run_greedy results_product_final_greedy ${BATCH_SIZE} ${GPU} ${SAVE_PREDICTIONS}
+run_greedy_speculative results_product_final_greedy_speculative ${BATCH_SIZE} ${DRAFT_LEN} ${N_DRAFTS} ${GPU} ${SAVE_PREDICTIONS}
 
 # Greedy decoding
 for batch_size in 1 4 16 32; do
