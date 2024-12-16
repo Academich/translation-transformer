@@ -1,29 +1,8 @@
-from typing import Optional
-
 import torch
 from torch import LongTensor, BoolTensor, Tensor
 from torch import nn
 
 from model.embeddings import TokenEmbedding, PositionalEncoding
-
-
-class TransformerDecoderLayerWithLeftPadding(nn.TransformerDecoderLayer):
-    """
-    For batched speculative decoding, we have to pad sequences from the left.
-    The transformer in pytorch gives nan attention scores when using pad masks and having pads on the left.
-    We can manually correct for that.
-    """
-
-
-    def _sa_block(self, x: Tensor,
-                  attn_mask: Optional[Tensor], key_padding_mask: Optional[Tensor], is_causal: bool = False) -> Tensor:
-        x = self.self_attn(x, x, x,
-                           attn_mask=attn_mask,
-                           key_padding_mask=key_padding_mask,
-                           is_causal=is_causal,
-                           need_weights=False)[0]
-        torch.nan_to_num_(x)  # This is an extra line
-        return self.dropout1(x)
 
 
 class VanillaTransformer(nn.Module):
@@ -89,14 +68,14 @@ class VanillaTransformer(nn.Module):
                                               nn.LayerNorm(self.emb_dim, eps=layer_norm_eps)
                                           ),
                                           custom_decoder=nn.TransformerDecoder(
-                                              TransformerDecoderLayerWithLeftPadding(d_model=self.emb_dim,
-                                                                                     nhead=self.num_heads,
-                                                                                     dim_feedforward=self.ff_dim,
-                                                                                     dropout=self.dropout_rate,
-                                                                                     activation=self.activation,
-                                                                                     layer_norm_eps=layer_norm_eps,
-                                                                                     batch_first=batch_first,
-                                                                                     norm_first=norm_first),
+                                              nn.TransformerDecoderLayer(d_model=self.emb_dim,
+                                                                         nhead=self.num_heads,
+                                                                         dim_feedforward=self.ff_dim,
+                                                                         dropout=self.dropout_rate,
+                                                                         activation=self.activation,
+                                                                         layer_norm_eps=layer_norm_eps,
+                                                                         batch_first=batch_first,
+                                                                         norm_first=norm_first),
                                               self.num_dec_layers,
                                               nn.LayerNorm(self.emb_dim, eps=layer_norm_eps)
                                           ))
