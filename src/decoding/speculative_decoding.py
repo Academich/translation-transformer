@@ -1235,6 +1235,9 @@ class TranslationInferenceGreedySpeculativeNoLeftPads:
 
         finished_predictions = torch.full((B, self.max_len), self.pad_token).type_as(src)
 
+        # A helper tensor
+        draft_len_range = torch.arange(D + 1).type_as(src)
+
         iters = 0
         while generated_tokens.size(1) < self.max_len:  # while gnrtd_len < self.max_len
             iters += 1
@@ -1250,7 +1253,7 @@ class TranslationInferenceGreedySpeculativeNoLeftPads:
             generated_tokens_padded_inflated = torch.repeat_interleave(generated_tokens_padded[:, :-1], N, dim=0) # (B*N, Lg + D)
             front_index_inflated = torch.repeat_interleave(front_index, N, dim=0) # (B*N, 1)
 
-            insertion_indices = front_index_inflated + torch.arange(D) + 1 # (B*N, D)
+            insertion_indices = front_index_inflated + draft_len_range[:-1] + 1 # (B*N, D)
 
             # Concatenate the already generated sequences with the corresponding draft sequences
             draft_tokens_effective_batch_size = draft_tokens.view(draft_tokens.size(0) * draft_tokens.size(1), draft_tokens.size(2))
@@ -1268,13 +1271,12 @@ class TranslationInferenceGreedySpeculativeNoLeftPads:
             pred_tokens = torch.argmax(pred_logits, dim=2) # (B*N, Lg + D)
 
             # Consider only the tokens predicted for the draft
-            retrieval_indices = front_index_inflated + torch.arange(D + 1)
-            pred_tokens =pred_tokens.gather(dim=1, index=retrieval_indices) # (B*N, D + 1)
+            retrieval_indices = front_index_inflated + draft_len_range
+            pred_tokens = pred_tokens.gather(dim=1, index=retrieval_indices) # (B*N, D + 1)
             
             # Find the drafts with the most accepted tokens
             verification = draft_tokens_effective_batch_size == pred_tokens[:, :-1]  # (B*N, D)
-            _range = verification.cumsum(-1)
-            accepted_in_drafts = (torch.arange(1, verification.size(1) + 1).type_as(_range) == _range) # (B*N, D)
+            accepted_in_drafts = (torch.arange(1, verification.size(1) + 1, device=src.device) == verification.cumsum(-1)) # (B*N, D)
             n_accepted_in_drafts = accepted_in_drafts.sum(-1)
             n_accepted_in_drafts = n_accepted_in_drafts.view(Bc, N)
             n_accepted_in_drafts = n_accepted_in_drafts.topk(1, -1)
@@ -1286,11 +1288,11 @@ class TranslationInferenceGreedySpeculativeNoLeftPads:
             chosen = torch.gather(pred_tokens, 1, draft_i.unsqueeze(-1).expand(Bc, 1, D + 1)).squeeze(1)
 
             # Mask out the tokens that were not accepted
-            decline_pred_tokens = torch.arange(D + 1).type_as(n_accepted) > n_accepted
+            decline_pred_tokens = draft_len_range > n_accepted
             chosen_truncated_to_accepted = chosen.masked_fill(decline_pred_tokens, self.pad_token)
 
             # Insert the newly generated tokens into the entire generated sequence at the correct positions
-            insertion_indices = front_index + torch.arange(D + 1) + 1
+            insertion_indices = front_index + draft_len_range + 1
             generated_tokens = generated_tokens_padded.scatter(dim=1, index=insertion_indices, src=chosen_truncated_to_accepted)
             front_index = front_index + n_accepted + 1
 
@@ -1313,9 +1315,10 @@ class TranslationInferenceGreedySpeculativeNoLeftPads:
                 memory_inflated = memory_inflated[sequence_to_continue_inflated]
                 src_pad_mask_inflated = src_pad_mask_inflated[sequence_to_continue_inflated]
 
+            # If all sequences are finished, stop the decoding
             if unfinished_query_batch_indices.nelement() == 0:
                 break
 
-        return finished_predictions.unsqueeze(1)
+        return finished_predictions.unsqueeze(1) # (B, 1, Lg)
 
 
