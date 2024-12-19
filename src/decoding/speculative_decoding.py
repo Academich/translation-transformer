@@ -444,7 +444,7 @@ class TranslationInferenceBeamSearchSpeculativeBatchedWithoutLeftPads:
             # We use nucleus=0.9975 and max_num_of_unmasked_positions=5 to avoid sampling of low probable sequences
             # and reduce calculation
             masked_probs = mask_with_num_logits_according_nucleus(pred_logits, nucleus=0.9975,
-                                                                  max_num_of_unmasked_positions=5,
+                                                                  max_num_of_unmasked_positions=self.n_best,
                                                                   num="-inf").softmax(-1)
             #   -> (n_candidates * n_drafts, draft_len + 1, vocab_size)
 
