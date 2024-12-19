@@ -175,18 +175,28 @@ for i in {1..5}; do
 done
 
 
-# Beam search decoding with five beams
-NBEST=5
-for batch_size in 1 2 4 8; do
-  run_beam_search results_product_beam_search ${batch_size} ${NBEST} ${GPU}
+GPU=0
+SAVE_PREDICTIONS=true
+N_BEST=5
+
+# Beam search decoding with five hypotheses
+# Five runs for time spread estimation
+for i in {1..5}; do
+
+  # Batch size 1, 10 draft tokens, 23 drafts
+  run_beam_search results_product_final_beam_search 1 ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
+  run_beam_search_speculative results_product_final_beam_search_speculative 1 10 23 ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
+
+  # Batch size 2, 14 draft tokens, 10 drafts
+  run_beam_search results_product_final_beam_search 2 ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
+  run_beam_search_speculative results_product_final_beam_search_speculative 2 14 10 ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
+
+  # Batch size 3, 9 draft tokens, 10 drafts
+  run_beam_search results_product_final_beam_search 3 ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
+  run_beam_search_speculative results_product_final_beam_search_speculative 3 9 10 ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
+
+  # Batch size 4, 10 draft tokens, 7 drafts
+  run_beam_search results_product_final_beam_search 4 ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
+  run_beam_search_speculative results_product_final_beam_search_speculative 4 10 7 ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
 done
-
-# # Speculative greedy decoding
-# DRAFT_LEN=10
-# N_DRAFTS=23
-# run_greedy_speculative results_product_greedy_speculative ${BATCH_SIZE} ${DRAFT_LEN} ${N_DRAFTS} ${GPU}
-
-# # Speculative beam search as greedy
-# NBEST=5
-# run_speculative_beam_search results_product_beam_search_speculative ${BATCH_SIZE} ${NBEST} ${DRAFT_LEN} ${N_DRAFTS} ${GPU}
 
