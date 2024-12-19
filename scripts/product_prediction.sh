@@ -185,18 +185,18 @@ for i in {1..5}; do
 
   # Batch size 1, 10 draft tokens, 23 drafts
   run_beam_search results_product_final_beam_search 1 ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
-  run_beam_search_speculative results_product_final_beam_search_speculative 1 10 23 ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
+  run_beam_search_speculative results_product_final_beam_search_speculative 1 ${N_BEST} 10 23 ${GPU} ${SAVE_PREDICTIONS}
 
   # Batch size 2, 14 draft tokens, 10 drafts
   run_beam_search results_product_final_beam_search 2 ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
-  run_beam_search_speculative results_product_final_beam_search_speculative 2 14 10 ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
+  run_beam_search_speculative results_product_final_beam_search_speculative 2 ${N_BEST} 14 10 ${GPU} ${SAVE_PREDICTIONS}
 
   # Batch size 3, 9 draft tokens, 10 drafts
   run_beam_search results_product_final_beam_search 3 ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
-  run_beam_search_speculative results_product_final_beam_search_speculative 3 9 10 ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
+  run_beam_search_speculative results_product_final_beam_search_speculative 3 ${N_BEST} 9 10 ${GPU} ${SAVE_PREDICTIONS}
 
   # Batch size 4, 10 draft tokens, 7 drafts
   run_beam_search results_product_final_beam_search 4 ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
-  run_beam_search_speculative results_product_final_beam_search_speculative 4 10 7 ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
+  run_beam_search_speculative results_product_final_beam_search_speculative 4 ${N_BEST} 10 7 ${GPU} ${SAVE_PREDICTIONS}
 done
 
