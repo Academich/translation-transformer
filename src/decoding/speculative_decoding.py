@@ -61,8 +61,9 @@ class TranslationInferenceGreedySpeculative:
         src_pad_mask = (src == self.model.src_pad_token_i).bool() # (B, Ls)
         memory = self.model.encode_src(src, src_pad_mask) # (B, Ls, E)
 
+        # we don't need the bos token in drafts
         draft_tokens = make_drafts(
-            src, 
+            src[:, 1:],
             draft_len=self.draft_len, 
             n_drafts=self.n_drafts, 
             min_draft_len=1, 
@@ -242,7 +243,7 @@ class TranslationInferenceBeamSearchSpeculativeBatchedWithoutLeftPads:
               new_log_probs_history: tensor (num_lines, max_len)
               num_of_new_seqs_for_each_in_batch: tensor (b_size)
               token_postn: tensor (num_lines), to calculate the number of accepted tokens in the next top n sequences
-                later; self.acceptance_rate_pad_for_alredy_finished_seqs means that the given sequence had already the
+                later; self.acceptance_rate_pad_for_already_finished_seqs means that the given sequence had already the
                 eos token and so didn't need subsequent tokens
         """
         drafted_len = curr_lines.shape[1]
@@ -336,7 +337,9 @@ class TranslationInferenceBeamSearchSpeculativeBatchedWithoutLeftPads:
         return previous_roots, log_prob_history_of_roots, num_of_new_seqs_for_each_in_batch, token_postn
 
     def generate(self, src: 'torch.LongTensor') -> list['torch.LongTensor']:
-        draft_tokens = make_drafts(src, self.draft_len, self.requested_drafts_num, self.min_draft_len, self.max_draft_len, self.eos_token_idx, self.pad_token_idx, self.C_token_idx)
+        # we don't need the bos token in drafts
+        draft_tokens = make_drafts(src[:, 1:], self.draft_len, self.requested_drafts_num, self.min_draft_len,
+                                   self.max_draft_len, self.eos_token_idx, self.pad_token_idx, self.C_token_idx)
 
         b_size, n_drafts, draft_len = draft_tokens.size()
         self.n_drafts += b_size * n_drafts

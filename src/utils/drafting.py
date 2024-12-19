@@ -42,7 +42,7 @@ def make_drafts(
     assert eos_token_idx != replace_token_idx, "The eos token and the replace token must be different"
     assert eos_token_idx != pad_token_idx, "The eos token and the pad token must be different"
 
-    s = src[:, 1:].clone()  # we don't need the bos token
+    s = src.clone()
     B, L = s.shape
     N = n_drafts
     D = min(max(min_draft_len, draft_len), max_draft_len)  # Adjusted draft length
