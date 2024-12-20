@@ -85,7 +85,7 @@ function run_speculative_beam_search() {
           --model.n_drafts ${N_DRAFTS} ${PREDICTION_WRITER} ${DEVICE}
 }
 
-# Beam search decoding with five hypotheses
+# Beam search decoding with batch size 1
 # Five runs for time spread estimation
 BATCH_SIZE=1
 SAVE_PREDICTIONS=false
@@ -108,3 +108,24 @@ for i in {1..5}; do
   run_speculative_beam_search results_retrosynthesis_sbs_bs_${BATCH_SIZE}_nbest_20_gpu${GPU} ${BATCH_SIZE} 20 14 5 ${GPU} ${SAVE_PREDICTIONS}
 
 done
+
+# Beam search decoding with ten hypotheses
+# Five runs for time spread estimation
+N_BEST=10
+SAVE_PREDICTIONS=false
+for i in {1..5}; do
+
+  # batch size 2, ? draft tokens, ? drafts
+  run_beam_search results_retrosynthesis_beam_search_bs_2_nbest_${N_BEST}_gpu${GPU} 2 ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
+  run_speculative_beam_search results_retrosynthesis_sbs_bs_2_nbest_${N_BEST}_gpu${GPU} 2 ${N_BEST} 10 10 ${GPU} ${SAVE_PREDICTIONS}
+
+  # batch size 4, ? draft tokens, ? drafts
+  run_beam_search results_retrosynthesis_beam_search_bs_4_nbest_${N_BEST}_gpu${GPU} 4 ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
+  run_speculative_beam_search results_retrosynthesis_sbs_bs_4_nbest_${N_BEST}_gpu${GPU} 4 ${N_BEST} 10 10 ${GPU} ${SAVE_PREDICTIONS}
+
+  # batch size 8, ? draft tokens, ? drafts
+  run_beam_search results_retrosynthesis_beam_search_bs_8_nbest_${N_BEST}_gpu${GPU} 8 ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
+  run_speculative_beam_search results_retrosynthesis_sbs_bs_8_nbest_${N_BEST}_gpu${GPU} 8 ${N_BEST} 14 5 ${GPU} ${SAVE_PREDICTIONS}
+
+done
+
