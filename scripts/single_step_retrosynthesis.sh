@@ -85,59 +85,26 @@ function run_speculative_beam_search() {
           --model.n_drafts ${N_DRAFTS} ${PREDICTION_WRITER} ${DEVICE}
 }
 
-# Beam search
-BATCH_SIZE=8
+# Beam search decoding with five hypotheses
+# Five runs for time spread estimation
+BATCH_SIZE=1
+SAVE_PREDICTIONS=false
+for i in {1..5}; do
 
-# run_greedy results_retrosynthesis_greedy_500rxn_bs${BATCH_SIZE}_gpu6 ${BATCH_SIZE}
-# METHOD=beam_search
-# N_BEST=5
-for n in 2 3 5 7; #9 10 13 15 23;
-do
-  for d in 5 7 9 10 11 12 14 17 20;
-  do
-     run_speculative_beam_search results_retrosynthesis_sbs_like_greedy_nucleus_100_500rxn_bs${BATCH_SIZE}_gpu1 ${BATCH_SIZE} 1 $d $n
-  done
+  # 5 beams, 11 draft tokens, 15 drafts
+  run_beam_search results_retrosynthesis_beam_search_bs_${BATCH_SIZE}_nbest_5_gpu${GPU} ${BATCH_SIZE} 5 ${GPU} ${SAVE_PREDICTIONS}
+  run_speculative_beam_search results_retrosynthesis_sbs_bs_${BATCH_SIZE}_nbest_5_gpu${GPU} ${BATCH_SIZE} 5 11 15 ${GPU} ${SAVE_PREDICTIONS}
+
+  # 10 beams, 10 draft tokens, 10 drafts
+  run_beam_search results_retrosynthesis_beam_search_bs_${BATCH_SIZE}_nbest_10_gpu${GPU} ${BATCH_SIZE} 10 ${GPU} ${SAVE_PREDICTIONS}
+  run_speculative_beam_search results_retrosynthesis_sbs_bs_${BATCH_SIZE}_nbest_10_gpu${GPU} ${BATCH_SIZE} 10 10 10 ${GPU} ${SAVE_PREDICTIONS}
+
+  # 15 beams, 10 draft tokens, 10 drafts
+  run_beam_search results_retrosynthesis_beam_search_bs_${BATCH_SIZE}_nbest_15_gpu${GPU} ${BATCH_SIZE} 15 ${GPU} ${SAVE_PREDICTIONS}
+  run_speculative_beam_search results_retrosynthesis_sbs_bs_${BATCH_SIZE}_nbest_15_gpu${GPU} ${BATCH_SIZE} 15 10 10 ${GPU} ${SAVE_PREDICTIONS}
+
+  # 20 beams, 14 draft tokens, 5 drafts
+  run_beam_search results_retrosynthesis_beam_search_bs_${BATCH_SIZE}_nbest_20_gpu${GPU} ${BATCH_SIZE} 20 ${GPU} ${SAVE_PREDICTIONS}
+  run_speculative_beam_search results_retrosynthesis_sbs_bs_${BATCH_SIZE}_nbest_20_gpu${GPU} ${BATCH_SIZE} 20 14 5 ${GPU} ${SAVE_PREDICTIONS}
+
 done
-
-
-# # Speculative beam search
-# for l in 10;
-# do
-#     for d in 3 5 10 15 25;
-#     do
-#             for i in 1 2 3;
-#             do
-#               run_speculative_beam_search results_retrosynthesis_sbs_linspace_drafting ${BATCH_SIZE} ${N_BEST} ${l} ${d}
-#             done
-#     done
-# done
-
-# Speculative beam search
-METHOD=beam_search_speculative
-DRAFT_LEN=10
-run_prediction results_retrosynthesis_${METHOD} ${METHOD} ${BATCH_SIZE} ${N_BEST} ${DRAFT_LEN}
-
-#Uncomment to run predictions five times to estimate the spread of inference time
-
-# N_ATTEMPTS=5
-
-# METHOD=beam_search
-# for i in $(seq 1 ${N_ATTEMPTS});
-# do
-#    for n in 5 10 25;
-#    do
-#        run_prediction results_retrosynthesis_${METHOD} ${METHOD} 1 ${n} 1 ${i}
-#    done
-# done
-
-# METHOD=beam_search_speculative
-# for i in $(seq 1 ${N_ATTEMPTS});
-# do
-#    for n in 5 10 25;
-#    do
-#      for ((d = 1; d <= 20; d += 3));
-#        do
-#          run_prediction results_retrosynthesis_${METHOD} ${METHOD} 1 ${n} ${d} ${i}
-#        done
-#    done
-# done
