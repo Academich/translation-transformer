@@ -754,11 +754,13 @@ class TranslationInferenceBeamSearchSpeculativeBatchedWithoutLeftPadsCurrToken:
         # -> (b_sz, vocab_size, n_drafts)
         t = vocab_tokens_bool.view(-1, n_drafts)
         t[t.sum(-1) == 0, 0] = True   # Each line needs at least one draft
+        t[t.cumsum(-1) > self.requested_drafts_num] = False
         return vocab_tokens_bool
 
     def generate(self, src: 'torch.LongTensor') -> list['torch.LongTensor']:
-        preliminary_drafts_num = min(src.shape[1] - 5, self.requested_drafts_num)
-        # we need the bos token in drafts
+        preliminary_drafts_num = src.shape[1] - 5
+        # the last draft will contain only 5 meaningfull tokens of the src molecule
+        # We need the bos token in drafts
         draft_lib = make_drafts(src, self.draft_len+1, preliminary_drafts_num, self.min_draft_len, self.max_draft_len,
                                 self.eos_token_idx, self.pad_token_idx, self.C_token_idx)
         # -> (b_size, n_drafts, draft_len)
