@@ -115,15 +115,15 @@ N_BEST=10
 SAVE_PREDICTIONS=false
 for i in {1..5}; do
 
-  # batch size 2, ? draft tokens, ? drafts
+  # batch size 2, 12 draft tokens, 5 drafts
   run_beam_search results_retrosynthesis_beam_search_bs_2_nbest_${N_BEST}_gpu${GPU} 2 ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
   run_speculative_beam_search results_retrosynthesis_sbs_bs_2_nbest_${N_BEST}_gpu${GPU} 2 ${N_BEST} 10 10 ${GPU} ${SAVE_PREDICTIONS}
 
-  # batch size 4, ? draft tokens, ? drafts
+  # batch size 4, 10 draft tokens, 3 drafts
   run_beam_search results_retrosynthesis_beam_search_bs_4_nbest_${N_BEST}_gpu${GPU} 4 ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
   run_speculative_beam_search results_retrosynthesis_sbs_bs_4_nbest_${N_BEST}_gpu${GPU} 4 ${N_BEST} 10 10 ${GPU} ${SAVE_PREDICTIONS}
 
-  # batch size 8, ? draft tokens, ? drafts
+  # batch size 8, 10 draft tokens, 2 drafts
   run_beam_search results_retrosynthesis_beam_search_bs_8_nbest_${N_BEST}_gpu${GPU} 8 ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
   run_speculative_beam_search results_retrosynthesis_sbs_bs_8_nbest_${N_BEST}_gpu${GPU} 8 ${N_BEST} 14 5 ${GPU} ${SAVE_PREDICTIONS}
 
