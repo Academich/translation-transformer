@@ -2,6 +2,7 @@ import datetime
 from typing import Any
 from timeit import default_timer as timer
 import json
+from pathlib import Path
 
 import torch
 from torch import nn
@@ -234,6 +235,8 @@ class VanillaEncoderDecoderTransformerLightning(LightningModule):
         if self.report_prediction_time:
             print(report)
             if self.hparams.report_prediction_file is not None:
+                report_prediction_dir = Path(self.hparams.report_prediction_file).parent
+                report_prediction_dir.mkdir(exist_ok=True)
                 with open(self.hparams.report_prediction_file, "a") as f:
                     print(report, file=f)
 
