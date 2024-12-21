@@ -106,7 +106,7 @@ function run_beam_search() {
           --model.report_prediction_file ${OUTPUT_DIR}/report.txt \
           --data.batch_size ${BS} \
           --model.generation beam_search \
-          --model.n_best ${NBEST} \
+          --model.beam_size ${NBEST} \
           --model.max_len ${MAX_LEN} ${PREDICTION_WRITER} ${DEVICE}
 }
 
@@ -144,7 +144,7 @@ function run_speculative_beam_search() {
           --data.batch_size ${BS} \
           --model.generation beam_search_speculative \
           --model.draft_len ${DRAFT_LEN} \
-          --model.n_best ${NBEST} \
+          --model.beam_size ${NBEST} \
           --model.max_len ${MAX_LEN} \
           --model.n_drafts ${N_DRAFTS} ${PREDICTION_WRITER} ${DEVICE}
 }

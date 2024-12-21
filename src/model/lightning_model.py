@@ -40,7 +40,7 @@ class VanillaEncoderDecoderTransformerLightning(LightningModule):
                  warmup_steps: int = 0,
 
                  generation: str = "beam_search",  # Prediction generation arguments
-                 n_best: int = 0,
+                 beam_size: int = 0,
                  max_len: int = 0,
                  n_drafts: int = 0,
                  draft_len: int = 0,
@@ -96,7 +96,7 @@ class VanillaEncoderDecoderTransformerLightning(LightningModule):
                                                         eos_token=self.tgt_eos_token_i)
         elif self.hparams.generation == "beam_search":
             return TranslationInferenceBeamSearch(self.model,
-                                                            beam_size=self.hparams.n_best,
+                                                            beam_size=self.hparams.beam_size,
                                                             max_len=self.hparams.max_len,
                                                             pad_token=self.tgt_pad_token_i,
                                                             bos_token=self.tgt_bos_token_i,
@@ -119,7 +119,7 @@ class VanillaEncoderDecoderTransformerLightning(LightningModule):
                 self.model,
                 vocab_size=self.tgt_vocab_size,
                 max_len=self.hparams.max_len,
-                n_best=self.hparams.n_best,
+                n_best=self.hparams.beam_size,
                 draft_len=self.hparams.draft_len,
                 n_drafts=self.hparams.n_drafts,
                 pad_token=self.tgt_pad_token_i,
