@@ -76,6 +76,7 @@ class TranslationInferenceBeamSearch:
         self.eos_token = eos_token
 
         assert self.max_len > 1
+        assert self.beam_size > 0
 
         self.model_calls_num = 0
         self.given_tokens = 0
