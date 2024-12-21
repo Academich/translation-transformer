@@ -213,25 +213,25 @@ class VanillaEncoderDecoderTransformerLightning(LightningModule):
             self.prediction_start_time = timer()
     
     def on_predict_end(self) -> None:
-        elapsed = datetime.timedelta(seconds=timer() - self.prediction_start_time)
-        report = {
-                "algorithm": self.hparams.generation,
-                "batch_size": self.trainer.datamodule.batch_size,
-                "tgt_test_path": str(self.trainer.datamodule.tgt_test_path),
-                "max_len": self.hparams.max_len,
-                "total_seconds": round(elapsed.total_seconds(), 4),
-                "model_calls": self.generator.model_calls_num,
-                "seconds_per_model_call": round(elapsed.total_seconds() / self.generator.model_calls_num, 4)
-            }
-        if self.hparams.generation in ("greedy_speculative", "beam_search_speculative"):
-            report["n_drafts"] = self.hparams.n_drafts
-            report["draft_len"] = self.hparams.draft_len
-            if self.hparams.generation == "beam_search_speculative":
-                report["accepted_tokens"] = self.generator.accepted_tokens_num
-                report["acceptance_rate"] = round(self.generator.accepted_tokens_num / self.generator.produced_non_pad_tokens, 4)
-        report = json.dumps(report)
-
         if self.report_prediction_time:
+            elapsed = datetime.timedelta(seconds=timer() - self.prediction_start_time)
+            report = {
+                    "algorithm": self.hparams.generation,
+                    "batch_size": self.trainer.datamodule.batch_size,
+                    "tgt_test_path": str(self.trainer.datamodule.tgt_test_path),
+                    "max_len": self.hparams.max_len,
+                    "total_seconds": round(elapsed.total_seconds(), 4),
+                    "model_calls": self.generator.model_calls_num,
+                    "seconds_per_model_call": round(elapsed.total_seconds() / self.generator.model_calls_num, 4)
+                }
+            if self.hparams.generation in ("greedy_speculative", "beam_search_speculative"):
+                report["n_drafts"] = self.hparams.n_drafts
+                report["draft_len"] = self.hparams.draft_len
+                if self.hparams.generation == "beam_search_speculative":
+                    report["accepted_tokens"] = self.generator.accepted_tokens_num
+                    report["acceptance_rate"] = round(self.generator.accepted_tokens_num / self.generator.produced_non_pad_tokens, 4)
+            report = json.dumps(report)
+
             print(report)
             if self.hparams.report_prediction_file is not None:
                 report_prediction_dir = Path(self.hparams.report_prediction_file).parent
