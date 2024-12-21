@@ -14,7 +14,7 @@ VOCAB_PATH=${CKPT_DIR}/vocab.json
 function run_beam_search() {
   local OUTPUT_DIR=${1:-} # Directory for the results and reports
   local BS=${2:-1} # Batch size
-  local NBEST=${3:-5} # Number of best sequences
+  local NBEST=${3:-0} # Number of best sequences
   local GPU=${4:-1}
   local SAVE_PREDICTIONS=${5:-false} # Whether to save predictions to disk. Slows down the run.
 
