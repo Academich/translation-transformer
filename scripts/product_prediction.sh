@@ -155,7 +155,7 @@ SAVE_PREDICTIONS=false
 
 # Greedy decoding
 # Five runs for time spread estimation
-for i in {1..5}; do
+for i in {1..6}; do
 
   # Batch size 1, 17 draft tokens, 23 drafts
   batch_size=1
@@ -184,6 +184,10 @@ for i in {1..5}; do
   n_drafts=3
   run_greedy results_product_final_greedy ${batch_size} ${GPU} ${SAVE_PREDICTIONS}
   run_greedy_speculative results_product_final_greedy_speculative ${batch_size} ${draft_len} ${n_drafts} ${GPU} ${SAVE_PREDICTIONS}
+
+  if [ "$i" -eq 5 ]; then
+    SAVE_PREDICTIONS=true
+  fi
 done
 
 
@@ -192,7 +196,7 @@ N_BEST=5
 
 # Beam search decoding with five hypotheses
 # Five runs for time spread estimation
-for i in {1..5}; do
+for i in {1..6}; do
 
   # Batch size 1, 10 draft tokens, 23 drafts
   batch_size=1
@@ -221,5 +225,9 @@ for i in {1..5}; do
   n_drafts=7
   run_beam_search results_product_final_beam_search ${batch_size} ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
   run_speculative_beam_search results_product_final_beam_search_speculative ${batch_size} ${N_BEST} ${draft_len} ${n_drafts} ${GPU} ${SAVE_PREDICTIONS}
+
+  if [ "$i" -eq 5 ]; then
+    SAVE_PREDICTIONS=true
+  fi
 done
 
