@@ -151,32 +151,43 @@ function run_speculative_beam_search() {
 
 
 GPU=0
-SAVE_PREDICTIONS=true
+SAVE_PREDICTIONS=false
 
 # Greedy decoding
 # Five runs for time spread estimation
 for i in {1..5}; do
 
   # Batch size 1, 17 draft tokens, 23 drafts
-  run_greedy results_product_final_greedy 1 ${GPU} ${SAVE_PREDICTIONS}
-  run_greedy_speculative results_product_final_greedy_speculative 1 17 23 ${GPU} ${SAVE_PREDICTIONS}
+  batch_size=1
+  draft_len=17
+  n_drafts=23
+  run_greedy results_product_final_greedy ${batch_size} ${GPU} ${SAVE_PREDICTIONS}
+  run_greedy_speculative results_product_final_greedy_speculative ${batch_size} ${draft_len} ${n_drafts} ${GPU} ${SAVE_PREDICTIONS}
 
   # Batch size 4, 14 draft tokens, 15 drafts
-  run_greedy results_product_final_greedy 4 ${GPU} ${SAVE_PREDICTIONS}
-  run_greedy_speculative results_product_final_greedy_speculative 4 14 15 ${GPU} ${SAVE_PREDICTIONS}
+  batch_size=4
+  draft_len=14
+  n_drafts=15
+  run_greedy results_product_final_greedy ${batch_size} ${GPU} ${SAVE_PREDICTIONS}
+  run_greedy_speculative results_product_final_greedy_speculative ${batch_size} ${draft_len} ${n_drafts} ${GPU} ${SAVE_PREDICTIONS}
 
   # Batch size 16, 7 draft tokens, 7 drafts
-  run_greedy results_product_final_greedy 16 ${GPU} ${SAVE_PREDICTIONS}
-  run_greedy_speculative results_product_final_greedy_speculative 16 7 7 ${GPU} ${SAVE_PREDICTIONS}
+  batch_size=16
+  draft_len=7
+  n_drafts=7
+  run_greedy results_product_final_greedy ${batch_size} ${GPU} ${SAVE_PREDICTIONS}
+  run_greedy_speculative results_product_final_greedy_speculative ${batch_size} ${draft_len} ${n_drafts} ${GPU} ${SAVE_PREDICTIONS}
 
   # Batch size 32, 5 draft tokens, 3 drafts
-  run_greedy results_product_final_greedy 32 ${GPU} ${SAVE_PREDICTIONS}
-  run_greedy_speculative results_product_final_greedy_speculative 32 5 3 ${GPU} ${SAVE_PREDICTIONS}
+  batch_size=32
+  draft_len=5
+  n_drafts=3
+  run_greedy results_product_final_greedy ${batch_size} ${GPU} ${SAVE_PREDICTIONS}
+  run_greedy_speculative results_product_final_greedy_speculative ${batch_size} ${draft_len} ${n_drafts} ${GPU} ${SAVE_PREDICTIONS}
 done
 
 
-GPU=0
-SAVE_PREDICTIONS=true
+SAVE_PREDICTIONS=false
 N_BEST=5
 
 # Beam search decoding with five hypotheses
@@ -184,19 +195,31 @@ N_BEST=5
 for i in {1..5}; do
 
   # Batch size 1, 10 draft tokens, 23 drafts
-  run_beam_search results_product_final_beam_search 1 ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
-  run_speculative_beam_search results_product_final_beam_search_speculative 1 ${N_BEST} 10 23 ${GPU} ${SAVE_PREDICTIONS}
+  batch_size=1
+  draft_len=10
+  n_drafts=23
+  run_beam_search results_product_final_beam_search ${batch_size} ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
+  run_speculative_beam_search results_product_final_beam_search_speculative ${batch_size} ${N_BEST} ${draft_len} ${n_drafts} ${GPU} ${SAVE_PREDICTIONS}
 
   # Batch size 2, 14 draft tokens, 10 drafts
-  run_beam_search results_product_final_beam_search 2 ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
-  run_speculative_beam_search results_product_final_beam_search_speculative 2 ${N_BEST} 14 10 ${GPU} ${SAVE_PREDICTIONS}
+  batch_size=2
+  draft_len=14
+  n_drafts=10
+  run_beam_search results_product_final_beam_search ${batch_size} ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
+  run_speculative_beam_search results_product_final_beam_search_speculative ${batch_size} ${N_BEST} ${draft_len} ${n_drafts} ${GPU} ${SAVE_PREDICTIONS}
 
   # Batch size 3, 9 draft tokens, 10 drafts
-  run_beam_search results_product_final_beam_search 3 ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
-  run_speculative_beam_search results_product_final_beam_search_speculative 3 ${N_BEST} 9 10 ${GPU} ${SAVE_PREDICTIONS}
+  batch_size=3
+  draft_len=9
+  n_drafts=10
+  run_beam_search results_product_final_beam_search ${batch_size} ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
+  run_speculative_beam_search results_product_final_beam_search_speculative ${batch_size} ${N_BEST} ${draft_len} ${n_drafts} ${GPU} ${SAVE_PREDICTIONS}
 
   # Batch size 4, 10 draft tokens, 7 drafts
-  run_beam_search results_product_final_beam_search 4 ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
-  run_speculative_beam_search results_product_final_beam_search_speculative 4 ${N_BEST} 10 7 ${GPU} ${SAVE_PREDICTIONS}
+  batch_size=4
+  draft_len=10
+  n_drafts=7
+  run_beam_search results_product_final_beam_search ${batch_size} ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
+  run_speculative_beam_search results_product_final_beam_search_speculative ${batch_size} ${N_BEST} ${draft_len} ${n_drafts} ${GPU} ${SAVE_PREDICTIONS}
 done
 

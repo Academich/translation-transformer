@@ -87,25 +87,38 @@ function run_speculative_beam_search() {
 
 # Beam search decoding with batch size 1
 # Five runs for time spread estimation
+GPU=0
 BATCH_SIZE=1
 SAVE_PREDICTIONS=false
 for i in {1..5}; do
 
   # 5 beams, 11 draft tokens, 15 drafts
-  run_beam_search results_retrosynthesis_beam_search_bs_${BATCH_SIZE}_nbest_5_gpu${GPU} ${BATCH_SIZE} 5 ${GPU} ${SAVE_PREDICTIONS}
-  run_speculative_beam_search results_retrosynthesis_sbs_bs_${BATCH_SIZE}_nbest_5_gpu${GPU} ${BATCH_SIZE} 5 11 15 ${GPU} ${SAVE_PREDICTIONS}
+  n_best=5
+  draft_len=11
+  n_drafts=15
+  run_beam_search results_retrosynthesis_beam_search_bs_${BATCH_SIZE}_nbest_${n_best}_gpu${GPU} ${BATCH_SIZE} ${n_best} ${GPU} ${SAVE_PREDICTIONS}
+  run_speculative_beam_search results_retrosynthesis_sbs_bs_${BATCH_SIZE}_nbest_${n_best}_gpu${GPU} ${BATCH_SIZE} ${n_best} ${draft_len} ${n_drafts} ${GPU} ${SAVE_PREDICTIONS}
 
   # 10 beams, 10 draft tokens, 10 drafts
-  run_beam_search results_retrosynthesis_beam_search_bs_${BATCH_SIZE}_nbest_10_gpu${GPU} ${BATCH_SIZE} 10 ${GPU} ${SAVE_PREDICTIONS}
-  run_speculative_beam_search results_retrosynthesis_sbs_bs_${BATCH_SIZE}_nbest_10_gpu${GPU} ${BATCH_SIZE} 10 10 10 ${GPU} ${SAVE_PREDICTIONS}
+  n_best=10
+  draft_len=10
+  n_drafts=10
+  run_beam_search results_retrosynthesis_beam_search_bs_${BATCH_SIZE}_nbest_${n_best}_gpu${GPU} ${BATCH_SIZE} ${n_best} ${GPU} ${SAVE_PREDICTIONS}
+  run_speculative_beam_search results_retrosynthesis_sbs_bs_${BATCH_SIZE}_nbest_${n_best}_gpu${GPU} ${BATCH_SIZE} ${n_best} ${draft_len} ${n_drafts} ${GPU} ${SAVE_PREDICTIONS}
 
   # 15 beams, 10 draft tokens, 10 drafts
-  run_beam_search results_retrosynthesis_beam_search_bs_${BATCH_SIZE}_nbest_15_gpu${GPU} ${BATCH_SIZE} 15 ${GPU} ${SAVE_PREDICTIONS}
-  run_speculative_beam_search results_retrosynthesis_sbs_bs_${BATCH_SIZE}_nbest_15_gpu${GPU} ${BATCH_SIZE} 15 10 10 ${GPU} ${SAVE_PREDICTIONS}
+  n_best=15
+  draft_len=10
+  n_drafts=10
+  run_beam_search results_retrosynthesis_beam_search_bs_${BATCH_SIZE}_nbest_${n_best}_gpu${GPU} ${BATCH_SIZE} ${n_best} ${GPU} ${SAVE_PREDICTIONS}
+  run_speculative_beam_search results_retrosynthesis_sbs_bs_${BATCH_SIZE}_nbest_${n_best}_gpu${GPU} ${BATCH_SIZE} ${n_best} ${draft_len} ${n_drafts} ${GPU} ${SAVE_PREDICTIONS}
 
   # 20 beams, 14 draft tokens, 5 drafts
-  run_beam_search results_retrosynthesis_beam_search_bs_${BATCH_SIZE}_nbest_20_gpu${GPU} ${BATCH_SIZE} 20 ${GPU} ${SAVE_PREDICTIONS}
-  run_speculative_beam_search results_retrosynthesis_sbs_bs_${BATCH_SIZE}_nbest_20_gpu${GPU} ${BATCH_SIZE} 20 14 5 ${GPU} ${SAVE_PREDICTIONS}
+  n_best=20
+  draft_len=14
+  n_drafts=5
+  run_beam_search results_retrosynthesis_beam_search_bs_${BATCH_SIZE}_nbest_${n_best}_gpu${GPU} ${BATCH_SIZE} ${n_best} ${GPU} ${SAVE_PREDICTIONS}
+  run_speculative_beam_search results_retrosynthesis_sbs_bs_${BATCH_SIZE}_nbest_${n_best}_gpu${GPU} ${BATCH_SIZE} ${n_best} ${draft_len} ${n_drafts} ${GPU} ${SAVE_PREDICTIONS}
 
 done
 
@@ -116,16 +129,25 @@ SAVE_PREDICTIONS=false
 for i in {1..5}; do
 
   # batch size 2, 12 draft tokens, 5 drafts
-  run_beam_search results_retrosynthesis_beam_search_bs_2_nbest_${N_BEST}_gpu${GPU} 2 ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
-  run_speculative_beam_search results_retrosynthesis_sbs_bs_2_nbest_${N_BEST}_gpu${GPU} 2 ${N_BEST} 12 5 ${GPU} ${SAVE_PREDICTIONS}
+  batch_size=2
+  draft_len=12
+  n_drafts=5
+  run_beam_search results_retrosynthesis_beam_search_bs_${batch_size}_nbest_${N_BEST}_gpu${GPU} ${batch_size} ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
+  run_speculative_beam_search results_retrosynthesis_sbs_bs_${batch_size}_nbest_${N_BEST}_gpu${GPU} ${batch_size} ${N_BEST} ${draft_len} ${n_drafts} ${GPU} ${SAVE_PREDICTIONS}
 
   # batch size 4, 10 draft tokens, 3 drafts
-  run_beam_search results_retrosynthesis_beam_search_bs_4_nbest_${N_BEST}_gpu${GPU} 4 ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
-  run_speculative_beam_search results_retrosynthesis_sbs_bs_4_nbest_${N_BEST}_gpu${GPU} 4 ${N_BEST} 10 3 ${GPU} ${SAVE_PREDICTIONS}
+  batch_size=4
+  draft_len=10
+  n_drafts=3
+  run_beam_search results_retrosynthesis_beam_search_bs_${batch_size}_nbest_${N_BEST}_gpu${GPU} ${batch_size} ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
+  run_speculative_beam_search results_retrosynthesis_sbs_bs_${batch_size}_nbest_${N_BEST}_gpu${GPU} ${batch_size} ${N_BEST} ${draft_len} ${n_drafts} ${GPU} ${SAVE_PREDICTIONS}
 
   # batch size 8, 10 draft tokens, 2 drafts
-  run_beam_search results_retrosynthesis_beam_search_bs_8_nbest_${N_BEST}_gpu${GPU} 8 ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
-  run_speculative_beam_search results_retrosynthesis_sbs_bs_8_nbest_${N_BEST}_gpu${GPU} 8 ${N_BEST} 10 2 ${GPU} ${SAVE_PREDICTIONS}
+  batch_size=8
+  draft_len=10
+  n_drafts=2
+  run_beam_search results_retrosynthesis_beam_search_bs_${batch_size}_nbest_${N_BEST}_gpu${GPU} ${batch_size} ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
+  run_speculative_beam_search results_retrosynthesis_sbs_bs_${batch_size}_nbest_${N_BEST}_gpu${GPU} ${batch_size} ${N_BEST} ${draft_len} ${n_drafts} ${GPU} ${SAVE_PREDICTIONS}
 
 done
 
