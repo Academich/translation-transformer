@@ -63,13 +63,13 @@ class TranslationInferenceBeamSearch:
 
     def __init__(self,
                  model,  # TranslationModel
-                 beam_size: int,
+                 n_best: int,
                  max_len: int,
                  pad_token: int,
                  bos_token: int,
                  eos_token: int):
         self.model = model
-        self.beam_size = beam_size
+        self.beam_size = n_best
         self.max_len = max_len
         self.pad_token = pad_token
         self.bos_token = bos_token
