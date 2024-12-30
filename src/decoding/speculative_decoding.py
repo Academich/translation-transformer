@@ -442,16 +442,16 @@ class TranslationInferenceBeamSearchSpeculativeBatchedWithoutLeftPads:
 
         num_of_empty_columns = ((generated_tokens == self.pad_token_idx).sum(0) == b_size).sum().item()
         #   -> (1,)
-        postn_of_last_meaning_token = generated_tokens.shape[1] - num_of_empty_columns
+        postn_after_the_last_meaning_token = generated_tokens.shape[1] - num_of_empty_columns
         #   -> (1,)
-        possible_draft_len = self.max_len - postn_of_last_meaning_token - 1
+        possible_draft_len = self.max_len - postn_after_the_last_meaning_token - 1
         #   -> (b_size, 1)
         beam_size = 1
 
         logits_base = torch.full((b_size * n_drafts, draft_len + 1, self.vocab_size), 0., device=src.device)
         #   -> (b_s * n_drafts, draft_len + 1, vocab_size)
 
-        while possible_draft_len >= 1 and postn_of_last_meaning_token <= self.max_len:
+        while possible_draft_len >= 1 and postn_after_the_last_meaning_token <= self.max_len:
             iters += 1
             logits_base = logits_base * 0.
             # We use artificial logits to avoid calculation of obvious pad predicting after eos
@@ -477,8 +477,8 @@ class TranslationInferenceBeamSearchSpeculativeBatchedWithoutLeftPads:
 
             draft_place_len = draft_len + 1 - num_of_empty_columns
             if draft_place_len > 0:
-                draft_place = torch.full((n_candidates,  draft_place_len), self.pad_token_idx, device=src.device)
-                generated_tokens = torch.cat((generated_tokens,  draft_place), dim=-1)
+                draft_place = torch.full((n_candidates, draft_place_len), self.pad_token_idx, device=src.device)
+                generated_tokens = torch.cat((generated_tokens, draft_place), dim=-1)
             # -> (n_candidates, drafted_len)
 
             logits_base = logits_base[:, :draft_len + 1, :]
@@ -818,13 +818,13 @@ class TranslationInferenceBeamSearchSpeculativeBatchedWithoutLeftPadsCurrToken:
 
         num_of_empty_columns = ((generated_tokens == self.pad_token_idx).sum(0) == b_size).sum().item()
         #   -> (1,)
-        postn_of_last_meaning_token = generated_tokens.shape[1] - num_of_empty_columns
+        postn_after_the_last_meaning_token = generated_tokens.shape[1] - num_of_empty_columns
         #   -> (1,)
-        possible_draft_len = self.max_len - postn_of_last_meaning_token - 1
+        possible_draft_len = self.max_len - postn_after_the_last_meaning_token - 1
         #   -> (b_size, 1)
         beam_size = 1
 
-        while possible_draft_len >= 1 and postn_of_last_meaning_token <= self.max_len:
+        while possible_draft_len >= 1 and postn_after_the_last_meaning_token <= self.max_len:
             iters += 1
 
             if iters == 1:
@@ -1040,9 +1040,9 @@ class TranslationInferenceBeamSearchSpeculativeBatchedWithoutLeftPadsCurrToken:
 
             num_of_empty_columns = torch.min((generated_tokens[not_fake_bool] == self.pad_token_idx).sum(-1)).item()
             #   -> (1,)
-            postn_of_last_meaning_token = generated_tokens[not_fake_bool].shape[1] - num_of_empty_columns
+            postn_after_the_last_meaning_token = generated_tokens.shape[1] - num_of_empty_columns
             #   -> (1,)
-            possible_draft_len = self.max_len - postn_of_last_meaning_token - 1
+            possible_draft_len = self.max_len - postn_after_the_last_meaning_token - 1
             #   -> (b_size, 1)
 
         return new_candidates
