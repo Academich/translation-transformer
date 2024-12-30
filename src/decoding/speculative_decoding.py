@@ -175,14 +175,17 @@ class TranslationInferenceGreedySpeculative:
         return finished_predictions.unsqueeze(1) # (B, 1, Lg)
 
 
-def topk_in_each_group(score_1d, length_of_each_group, k):
+def topk_in_each_group(score_1d, length_of_each_group, k, pad=None):
     """
-    This function finds top k values and indices. It is needed when each group has different number of candidates.
+    This function finds the biggest k values and the corresponding indices. It is needed when each group has different
+    number of candidates.
     N - number of_groups.
 
     :param score_1d: tensor (shape_0 = sum(length_of_each_group), 1)
     :param length_of_each_group: tensor (N,), Each length should be >= k
     :param k: int
+    :param pad: it's needed to fill fake score_1d positions to make reshape (N, max_len_of_group) possible. Pad should
+    be less than each number in score_1d
 
     :return:
       ->  topk_score: tensor (N, k),
@@ -190,6 +193,7 @@ def topk_in_each_group(score_1d, length_of_each_group, k):
 
     """
     b_size = length_of_each_group.shape[0]
+    assert torch.min(length_of_each_group).item() >= k
     max_len_of_group = torch.max(length_of_each_group).item()
 
     # We make fake sequences with an artificial probability -inf in case if a different number of sequences
@@ -201,6 +205,9 @@ def topk_in_each_group(score_1d, length_of_each_group, k):
 
     different_num_of_candidates_in_groups = (length_of_each_group == max_len_of_group).sum() != b_size
     if different_num_of_candidates_in_groups:
+        if pad is None:
+            pad = torch.min(score_1d).item() - 1
+
         inds_for_2d = torch.arange(max_len_of_group).to(score_1d.device).unsqueeze(0).repeat(b_size, 1)
         # -> (N, max_len_of_group)
 
@@ -209,7 +216,8 @@ def topk_in_each_group(score_1d, length_of_each_group, k):
 
         score_1d = score_1d[inds_for_2d.reshape(-1)]
         # -> (N * max_len_of_group, 1)
-        score_1d[mask_for_fake_seqs.reshape(-1)] = -float("inf")  # pads
+
+        score_1d[mask_for_fake_seqs.reshape(-1)] = pad  # pads
         score_2d = score_1d.reshape(b_size, max_len_of_group)
         # -> (N, max_len_of_group)
 
@@ -553,7 +561,8 @@ class TranslationInferenceBeamSearchSpeculativeBatchedWithoutLeftPads:
                             chosen_drafts, b_size, draft_place_bool, n_accepted.squeeze(-1))
 
             new_log_probs, top_inds_1d = topk_in_each_group(score_1d=new_log_probs,
-                                                            length_of_each_group=num_of_new_seqs_for_each_in_batch, k=self.n_best)
+                                                            length_of_each_group=num_of_new_seqs_for_each_in_batch,
+                                                            k=self.n_best, pad=-float("inf"))
             new_candidates = new_candidates[top_inds_1d]
             # -> (b_size * beam_size, drafted_len)
 
