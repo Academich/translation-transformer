@@ -890,7 +890,6 @@ class TranslationInferenceBeamSearchSpeculative:
                                                 memory[bool_idx_of_unfinished],
                                                 memory_pad_mask=src_pad_mask[bool_idx_of_unfinished])
             #  -> (num_of_unfinished, drafted_len, vocab_size)
-            print(torch.max(pred_logits.softmax(-1), -1).values)
             vocab_size = pred_logits.shape[-1]
 
             pred_logits = pred_logits[
