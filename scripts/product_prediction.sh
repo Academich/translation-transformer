@@ -118,11 +118,12 @@ function run_speculative_beam_search() {
   local NBEST=${3:-5} # Number of best sequences
   local DRAFT_LEN=${4:-10} # Draft sequence length
   local N_DRAFTS=${5:-23} # Maximum number of parallel drafts 
-  local GPU=${6:-1}
-  local SAVE_PREDICTIONS=${7:-false} # Whether to save predictions to disk. Slows down the run.
+  local SMART_DRAFTS_MODE=${6:-false}
+  local GPU=${7:-0}
+  local SAVE_PREDICTIONS=${8:-false} # Whether to save predictions to disk. Slows down the run.
 
   local DEVICE="--trainer.accelerator cpu --trainer.devices 1"
-  if [ -n "${GPU}" ]; then
+  if [ "${GPU}" != "false" ]; then
     DEVICE="--trainer.accelerator gpu --trainer.devices [${GPU}]"
   fi
 
@@ -143,6 +144,7 @@ function run_speculative_beam_search() {
           --model.report_prediction_file ${OUTPUT_DIR}/report.txt \
           --data.batch_size ${BS} \
           --model.generation beam_search_speculative \
+          --model.smart_drafts_mode ${SMART_DRAFTS_MODE} \
           --model.draft_len ${DRAFT_LEN} \
           --model.beam_size ${NBEST} \
           --model.max_len ${MAX_LEN} \
@@ -193,6 +195,7 @@ done
 
 SAVE_PREDICTIONS=false
 N_BEST=5
+SMART_DRAFTS=false
 
 # Beam search decoding with five hypotheses
 # Five runs for time spread estimation
@@ -203,28 +206,28 @@ for i in {1..6}; do
   draft_len=10
   n_drafts=23
   run_beam_search results_product_final_beam_search ${batch_size} ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
-  run_speculative_beam_search results_product_final_beam_search_speculative ${batch_size} ${N_BEST} ${draft_len} ${n_drafts} ${GPU} ${SAVE_PREDICTIONS}
+  run_speculative_beam_search results_product_final_beam_search_speculative ${batch_size} ${N_BEST} ${draft_len} ${n_drafts} ${SMART_DRAFTS} ${GPU} ${SAVE_PREDICTIONS}
 
   # Batch size 2, 14 draft tokens, 10 drafts
   batch_size=2
   draft_len=14
   n_drafts=10
   run_beam_search results_product_final_beam_search ${batch_size} ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
-  run_speculative_beam_search results_product_final_beam_search_speculative ${batch_size} ${N_BEST} ${draft_len} ${n_drafts} ${GPU} ${SAVE_PREDICTIONS}
+  run_speculative_beam_search results_product_final_beam_search_speculative ${batch_size} ${N_BEST} ${draft_len} ${n_drafts} ${SMART_DRAFTS} ${GPU} ${SAVE_PREDICTIONS}
 
   # Batch size 3, 9 draft tokens, 10 drafts
   batch_size=3
   draft_len=9
   n_drafts=10
   run_beam_search results_product_final_beam_search ${batch_size} ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
-  run_speculative_beam_search results_product_final_beam_search_speculative ${batch_size} ${N_BEST} ${draft_len} ${n_drafts} ${GPU} ${SAVE_PREDICTIONS}
+  run_speculative_beam_search results_product_final_beam_search_speculative ${batch_size} ${N_BEST} ${draft_len} ${n_drafts} ${SMART_DRAFTS} ${GPU} ${SAVE_PREDICTIONS}
 
   # Batch size 4, 10 draft tokens, 7 drafts
   batch_size=4
   draft_len=10
   n_drafts=7
   run_beam_search results_product_final_beam_search ${batch_size} ${N_BEST} ${GPU} ${SAVE_PREDICTIONS}
-  run_speculative_beam_search results_product_final_beam_search_speculative ${batch_size} ${N_BEST} ${draft_len} ${n_drafts} ${GPU} ${SAVE_PREDICTIONS}
+  run_speculative_beam_search results_product_final_beam_search_speculative ${batch_size} ${N_BEST} ${draft_len} ${n_drafts} ${SMART_DRAFTS} ${GPU} ${SAVE_PREDICTIONS}
 
   if [ "$i" -eq 5 ]; then
     SAVE_PREDICTIONS=true
