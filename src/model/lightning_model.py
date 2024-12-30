@@ -13,7 +13,7 @@ from pytorch_lightning.utilities.types import STEP_OUTPUT
 
 from data_handling.tokenizer_base import GenericTokenizer
 from decoding.standard_decoding import TranslationInferenceGreedy, TranslationInferenceBeamSearch
-from decoding.speculative_decoding import TranslationInferenceGreedySpeculative, TranslationInferenceBeamSearchSpeculativeBatchedWithoutLeftPads
+from decoding.speculative_decoding import TranslationInferenceGreedySpeculative, TranslationInferenceBeamSearchSpeculative
 from model.modules import VanillaTransformer
 from utils.lr_schedules import NoamLRSchedule, ConstantLRSchedule
 from utils.metrics import calc_token_acc, calc_sequence_acc
@@ -44,6 +44,8 @@ class VanillaEncoderDecoderTransformerLightning(LightningModule):
                  max_len: int = 0,
                  n_drafts: int = 0,
                  draft_len: int = 0,
+                 smart_drafts_mode: bool = True,
+
                  report_prediction_time: bool = True,
                  report_prediction_file: str | None = None
                  ):
@@ -115,7 +117,7 @@ class VanillaEncoderDecoderTransformerLightning(LightningModule):
                 replace_token=self.tgt_tokenizer.encoder_dict["c"]
             )
         elif self.hparams.generation == "beam_search_speculative":
-            return TranslationInferenceBeamSearchSpeculativeBatchedWithoutLeftPads(
+            return TranslationInferenceBeamSearchSpeculative(
                 self.model,
                 vocab_size=self.tgt_vocab_size,
                 max_len=self.hparams.max_len,
@@ -125,7 +127,8 @@ class VanillaEncoderDecoderTransformerLightning(LightningModule):
                 pad_token=self.tgt_pad_token_i,
                 bos_token=self.tgt_bos_token_i,
                 eos_token=self.tgt_eos_token_i,
-                C_token=self.tgt_tokenizer.encoder_dict["c"]
+                C_token=self.tgt_tokenizer.encoder_dict["c"],
+                smart_drafts_mode=self.hparams.smart_drafts_mode
             )
 
         else:

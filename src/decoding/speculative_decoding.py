@@ -611,19 +611,21 @@ class TranslationInferenceBeamSearchSpeculativeBatchedWithoutLeftPads:
         return accepted_in_drafts_bool.sum(-1)  # (n_candidates, n_drafts, draft_len) -> (n_candidates, n_drafts)
 
 
-class TranslationInferenceBeamSearchSpeculativeBatchedWithoutLeftPadsCurrToken:
+class TranslationInferenceBeamSearchSpeculative:
     def __init__(self,
                  model,  # TranslationModel
                  max_len: int,
                  n_best: int,
                  draft_len: int,
                  n_drafts: int,
+                 vocab_size: int,
+                 smart_drafts_mode: bool,
                  pad_token: int,
                  bos_token: int,
                  eos_token: int,
                  C_token: int,
-                 vocab_size,
                  ) -> None:
+        self.smart_drafts_mode = smart_drafts_mode
         self.model = model
         self.max_len = max_len
         self.vocab_size = vocab_size
@@ -789,6 +791,184 @@ class TranslationInferenceBeamSearchSpeculativeBatchedWithoutLeftPadsCurrToken:
         return vocab_tokens_bool
 
     def generate(self, src: 'torch.LongTensor') -> list['torch.LongTensor']:
+        if self.smart_drafts_mode:
+            return self.generate_with_smart_drafts(src)
+        else:
+            return self.generate_trying_all_the_drafts(src)
+
+    def generate_trying_all_the_drafts(self, src: 'torch.LongTensor') -> list['torch.LongTensor']:
+        # we don't need the bos token in drafts
+        draft_tokens = make_drafts(src[:, 1:], self.draft_len, self.requested_drafts_num, self.min_draft_len,
+                                   self.max_draft_len, self.eos_token_idx, self.pad_token_idx, self.C_token_idx)
+
+        b_size, n_drafts, draft_len = draft_tokens.size()
+        self.n_drafts += b_size * n_drafts
+
+        src_pad_mask = (src == self.model.src_pad_token_i).bool()
+        # -> (b_size, src_len)
+
+        memory = self.model.encode_src(src, src_pad_mask)
+        # -> (b_size, src_len, emb_dim)
+        _, src_len, emb_dim = memory.size()
+        memory = memory.unsqueeze(1).repeat(1, n_drafts, 1, 1).reshape(b_size * n_drafts, src_len, emb_dim)
+        src_pad_mask = src_pad_mask.unsqueeze(1).repeat(1, n_drafts, 1).reshape(b_size * n_drafts, src_len)
+
+        iters = -1
+
+        generated_tokens = torch.full((b_size, 1), self.bos_token_idx, device=src.device)
+        #   -> (b_size, 1)
+
+        log_probs = torch.full((b_size, 1), 0., device=src.device)
+        #   -> (b_size, 1)
+
+        num_of_empty_columns = ((generated_tokens == self.pad_token_idx).sum(0) == b_size).sum().item()
+        #   -> (1,)
+        postn_after_the_last_meaning_token = generated_tokens.shape[1] - num_of_empty_columns
+        #   -> (1,)
+        possible_draft_len = self.max_len - postn_after_the_last_meaning_token - 1
+        #   -> (b_size, 1)
+        beam_size = 1
+
+        logits_base = torch.full((b_size * n_drafts, draft_len + 1, self.vocab_size), 0., device=src.device)
+        #   -> (b_s * n_drafts, draft_len + 1, vocab_size)
+
+        while possible_draft_len >= 1 and postn_after_the_last_meaning_token <= self.max_len:
+            iters += 1
+            logits_base = logits_base * 0.
+            # We use artificial logits to avoid calculation of obvious pad predicting after eos
+            logits_base[:, :, self.pad_token_idx] = 35.
+            # 35. will give about 100% probability for pad_token after softmax()
+
+            if iters == 1:
+                src_pad_mask = src_pad_mask.unsqueeze(1).repeat(1, self.n_best, 1).flatten(end_dim=1)
+                # -> (b_size * n_drafts * bm_sz, src_len)
+                memory = memory.unsqueeze(1).repeat(1, self.n_best, 1, 1).flatten(end_dim=1)
+                # -> (b_size * n_drafts * bm_sz, src_len, emb_dim)
+                draft_tokens = draft_tokens.unsqueeze(1).repeat(1, self.n_best, 1, 1).flatten(end_dim=1)
+                # -> (b_s * bm_sz, n_drafts, draft_len)
+                logits_base = logits_base.repeat(self.n_best, 1, 1)
+                #   -> (b_s * n_drafts * bm_sz, draft_len + 1, vocab_size)
+
+            bool_idx_of_unfinished = ~((generated_tokens == self.eos_token_idx).sum(-1).bool())
+            # -> (n_candidates)
+
+            draft_len = min(possible_draft_len, draft_len)
+            draft_tokens = draft_tokens[:, :, :draft_len]
+            n_candidates, curr_len = generated_tokens.size()
+
+            draft_place_len = draft_len + 1 - num_of_empty_columns
+            if draft_place_len > 0:
+                draft_place = torch.full((n_candidates, draft_place_len), self.pad_token_idx, device=src.device)
+                generated_tokens = torch.cat((generated_tokens, draft_place), dim=-1)
+            # -> (n_candidates, drafted_len)
+
+            logits_base = logits_base[:, :draft_len + 1, :]
+
+            self.model_calls_num += 1
+            pad_place_bool = generated_tokens == self.pad_token_idx
+            # -> (n_candidates, drafted_len)
+            draft_place_bool = torch.logical_and(pad_place_bool,
+                                                 pad_place_bool.cumsum(-1) <= draft_len)
+            # -> (n_candidates, drafted_len)
+
+            draft_place_bool_idx_input = draft_place_bool.unsqueeze(1).repeat(1, n_drafts, 1)
+            # -> (b_s * bm_sz, n_drafts, drafted_len)
+            generated_tokens_input = generated_tokens.unsqueeze(1).repeat(1, n_drafts, 1)
+            # -> (b_s * bm_sz, n_drafts, drafted_len)
+
+            generated_tokens_input[draft_place_bool_idx_input] = draft_tokens.reshape(-1)
+            draft_place_bool_idx_input = draft_place_bool_idx_input.flatten(end_dim=1)
+            # -> (b_s * bm_sz * n_drafts, drafted_len)
+            generated_tokens_input = generated_tokens_input.flatten(end_dim=1)
+            # # -> (b_s * bm_sz * n_drafts, drafted_len, vocab_size)
+
+            bool_idx_of_unfinished = bool_idx_of_unfinished.unsqueeze(-1).repeat(1, n_drafts).flatten(end_dim=1)
+            # -> (b_s * bm_sz * n_drafts)
+            draft_place_bool_idx_input = draft_place_bool_idx_input[bool_idx_of_unfinished]
+            #   -> (num_of_unfinished, drafted_len)
+            pred_logits = self.model.decode_tgt(generated_tokens_input[bool_idx_of_unfinished],
+                                                memory[bool_idx_of_unfinished],
+                                                memory_pad_mask=src_pad_mask[bool_idx_of_unfinished])
+            #  -> (num_of_unfinished, drafted_len, vocab_size)
+            print(torch.max(pred_logits.softmax(-1), -1).values)
+            vocab_size = pred_logits.shape[-1]
+
+            pred_logits = pred_logits[
+                torch.logical_or(draft_place_bool_idx_input, torch.roll(draft_place_bool_idx_input, -1, 1))].reshape(
+                -1, draft_len + 1, vocab_size)
+            #  -> (num_of_unfinished, draft_len + 1, vocab_size)
+
+            logits_base[bool_idx_of_unfinished] = pred_logits
+            pred_logits = logits_base
+            #   -> (n_candidates * n_drafts, draft_len + 1, vocab_size)
+
+            # Choosing the best draft for each candidate. The draft with the biggest number of
+            # approved tokens is the best draft for the given candidate. #########################################
+
+            # All unapproved tokens in masked_probs have zero probability
+            # We use nucleus=0.9975 and max_num_of_unmasked_positions=n_best to avoid sampling of low probable sequences
+            # and reduce calculation
+            masked_probs = mask_with_num_logits_according_nucleus(pred_logits, nucleus=0.9975,
+                                                                  max_num_of_unmasked_positions=self.n_best,
+                                                                  num="-inf").softmax(-1)
+            #   -> (n_candidates * n_drafts, draft_len + 1, vocab_size)
+
+            masked_probs = masked_probs.reshape(n_candidates, n_drafts, draft_len + 1, vocab_size)
+            draft_tokens = draft_tokens.reshape(n_candidates, n_drafts, draft_len)  # each candidate has the same
+            # collection of drafts
+
+            n_accepted_in_drafts = self.calculate_n_accepted_in_drafts(draft_tokens, masked_probs)
+            #   ->(n_candidates, n_drafts)
+
+            # Each candidate needs its best draft. Choose the draft with the biggest number of approved tokens
+            # for each candidate:
+            n_accepted, draft_i = n_accepted_in_drafts.topk(1, dim=-1)
+            # (n_candidates, n_drafts) -> (n_candidates, 1)
+
+            chosen_drafts = torch.gather(draft_tokens, dim=1,
+                                         index=draft_i.unsqueeze(-1).expand(n_candidates, 1, draft_len)).squeeze(1)
+            #   -> (n_candidates, draft_len)
+            ########################################################################################################
+            pred_logits = pred_logits.reshape(n_candidates, n_drafts, draft_len + 1, vocab_size)
+
+            # Further we need information only about chosen drafts
+            pred_logits = torch.gather(pred_logits, dim=1, index=draft_i.unsqueeze(-1).unsqueeze(-1).
+                                       expand(n_candidates, 1, draft_len + 1, vocab_size)).squeeze(1)
+            #   -> (n_candidates, draft_len + 1, vocab_size)
+
+            # Sample all possible lines within the chosen drafts:
+            # new_candidates have the initial tokens and the new ones
+            new_candidates, new_log_probs, num_of_new_seqs_for_each_in_batch, accepted_tokens_num = \
+                self.sample(generated_tokens, log_probs, pred_logits,
+                            chosen_drafts, b_size, draft_place_bool, n_accepted.squeeze(-1))
+
+            new_log_probs, top_inds_1d = topk_in_each_group(score_1d=new_log_probs,
+                                                            length_of_each_group=num_of_new_seqs_for_each_in_batch,
+                                                            k=self.n_best, pad=-float("inf"))
+            new_candidates = new_candidates[top_inds_1d]
+            # -> (b_size * beam_size, drafted_len)
+
+            accepted_tokens_num = accepted_tokens_num[top_inds_1d]
+            # -> (b_size * beam_size,)
+
+            self.accepted_tokens_num += accepted_tokens_num.sum().item()
+            self.produced_non_pad_tokens += accepted_tokens_num.sum().item() + accepted_tokens_num.size(0)
+
+            if (new_candidates == self.eos_token_idx).sum(-1).bool().sum() == b_size * self.n_best:
+                break
+            generated_tokens = new_candidates
+            log_probs = new_log_probs.reshape(b_size * self.n_best, 1)
+            # -> (b_size * beam_size, 1)
+
+            num_of_empty_columns = torch.min((generated_tokens == self.pad_token_idx).sum(-1)).item()
+            #   -> (1,)
+            postn_after_the_last_meaning_token = generated_tokens.shape[1] - num_of_empty_columns
+            #   -> (1,)
+            possible_draft_len = self.max_len - postn_after_the_last_meaning_token - 1
+            #   -> (b_size, 1)
+        return new_candidates.reshape(b_size, self.n_best, -1)
+
+    def generate_with_smart_drafts(self, src: 'torch.LongTensor') -> list['torch.LongTensor']:
         preliminary_drafts_num = src.shape[1] - 5
         # the last draft will contain only 5 meaningfull tokens of the src molecule
         # We need the bos token in drafts
