@@ -39,13 +39,13 @@ def main(filename: str):
         hit_top[f"top {i}"] = hit_top[f"top {i - 1}"] | hit[f"hit_{i}"]
 
     accuracy = hit_top.mean(0)[
-        [f"top {i}" for i in [1, 3, 5, 10, 50] if i <= hit_top.shape[1]]
+        [f"top {i}" for i in [1, 3, 5, 10, 15, 20, 50] if i <= hit_top.shape[1]]
     ]
     invalid_smiles = (report[report.columns[1:]] == "!").mean(0)[
-        [f"prediction {i}" for i in [1, 3, 5, 10, 50] if i <= hit_top.shape[1]]
+        [f"prediction {i}" for i in [1, 3, 5, 10, 15, 20, 50] if i <= hit_top.shape[1]]
     ]
     empty_smiles = (report[report.columns[1:]] == "").mean(0)[
-        [f"prediction {i}" for i in [1, 3, 5, 10, 50] if i <= hit_top.shape[1]]
+        [f"prediction {i}" for i in [1, 3, 5, 10, 15, 20, 50] if i <= hit_top.shape[1]]
     ]
     print("Accuracy, %")
     print((accuracy * 100).to_string())
