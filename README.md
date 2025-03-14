@@ -4,7 +4,7 @@ The repository contains an implementation of the [Molecular Transformer](https:/
 
 
 ## Speculative decoding
-The repository also contains the code to accompany the [manuscript](https://arxiv.org/abs/2407.09685)  
+The repository also contains the code to accompany the [paper](https://doi.org/10.1186/s13321-025-00974-w)  
 "Accelerating the inference of string generation-based chemical reaction models for industrial applications".
 
 The idea of the manuscript is that reaction product prediction and single-step retrosynthesis with the Molecular Transformer  
