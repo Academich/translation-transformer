@@ -568,6 +568,7 @@ class TranslationInferenceBeamSearchSpeculativeBatchedWithoutLeftPads:
 
             accepted_tokens_num = accepted_tokens_num[top_inds_1d]
             # -> (b_size * beam_size,)
+            accepted_tokens_num = accepted_tokens_num[accepted_tokens_num >= 0]
 
             self.accepted_tokens_num += accepted_tokens_num.sum().item()
             self.produced_non_pad_tokens += accepted_tokens_num.sum().item() + accepted_tokens_num.size(0)
@@ -710,7 +711,7 @@ class TranslationInferenceBeamSearchSpeculative:
                 index=n_accepted[not_entirely_excepted_bool].unsqueeze(-1), dim=1, value=self.bos_token_idx)
 
         masked_logits[:, :-1, :].scatter_(index=chosen_drafts.unsqueeze(-1), dim=2, value=0.)  # the accepted tokens in
-        # the drafts can not be leaves of the top n tree of sequences
+        # the drafts can not be leaves of the top n tree of the sequences
 
         # Sampling the top n tree of sequences leaves:
         candts_inds, token_postn, token_inds = torch.nonzero(masked_logits, as_tuple=True)
@@ -880,7 +881,7 @@ class TranslationInferenceBeamSearchSpeculative:
             draft_place_bool_idx_input = draft_place_bool_idx_input.flatten(end_dim=1)
             # -> (b_s * bm_sz * n_drafts, drafted_len)
             generated_tokens_input = generated_tokens_input.flatten(end_dim=1)
-            # # -> (b_s * bm_sz * n_drafts, drafted_len, vocab_size)
+            # # -> (b_s * bm_sz * n_drafts, drafted_len)
 
             bool_idx_of_unfinished = bool_idx_of_unfinished.unsqueeze(-1).repeat(1, n_drafts).flatten(end_dim=1)
             # -> (b_s * bm_sz * n_drafts)
@@ -949,6 +950,7 @@ class TranslationInferenceBeamSearchSpeculative:
 
             accepted_tokens_num = accepted_tokens_num[top_inds_1d]
             # -> (b_size * beam_size,)
+            accepted_tokens_num = accepted_tokens_num[accepted_tokens_num >= 0]
 
             self.accepted_tokens_num += accepted_tokens_num.sum().item()
             self.produced_non_pad_tokens += accepted_tokens_num.sum().item() + accepted_tokens_num.size(0)
