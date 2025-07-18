@@ -286,6 +286,8 @@ class TranslationInferenceBeamSearchSpeculative:
         self.acceptance_rate_pad_for_alredy_finished_seqs = -1  # should be negative
         self.acceptance_rate_pad_for_fake_seqs = -7  # should be negative
 
+        self.b_sz = 0
+
     def __str__(self):
         return f"SpeculativeSampling decoding (n_best={self.n_best}, max_len={self.max_len}, max_num_of_drafts={self.max_drafts_num}, draft_len={self.draft_len})"
 
@@ -595,12 +597,22 @@ class TranslationInferenceBeamSearchSpeculative:
             #   -> (b_size, 1)
         return new_candidates.reshape(b_size, self.n_best, -1)
 
-    def generate_with_smart_drafts(self, src: 'torch.LongTensor') -> list['torch.LongTensor']:
+    def generate_with_smart_drafts(
+        self, src: "torch.LongTensor"
+    ) -> list["torch.LongTensor"]:
         preliminary_drafts_num = src.shape[1] - 5
         # the last draft will contain only 5 meaningfull tokens of the src molecule
         # We need the bos token in drafts
-        draft_lib = make_drafts(src, self.draft_len+1, preliminary_drafts_num, self.min_draft_len, self.max_draft_len,
-                                self.eos_token_idx, self.pad_token_idx, self.C_token_idx)
+        draft_lib = make_drafts(
+            src,
+            self.draft_len + 1,
+            preliminary_drafts_num,
+            self.min_draft_len,
+            self.max_draft_len,
+            self.eos_token_idx,
+            self.pad_token_idx,
+            self.C_token_idx,
+        )
         # -> (b_size, n_drafts, draft_len)
 
         vocab_tokens_bool_lib = self.get_vocab_tokens_bool_lib(draft_lib)
@@ -617,51 +629,80 @@ class TranslationInferenceBeamSearchSpeculative:
 
         iters = -1
 
-        generated_tokens = torch.full((b_size, 1), self.bos_token_idx, device=src.device)
+        generated_tokens = torch.full(
+            (b_size, 1), self.bos_token_idx, device=src.device
+        )
         #   -> (b_size, 1)
 
-        log_probs = torch.full((b_size, 1), 0., device=src.device)
+        log_probs = torch.full((b_size, 1), 0.0, device=src.device)
         #   -> (b_size, 1)
 
-        num_of_empty_columns = ((generated_tokens == self.pad_token_idx).sum(0) == b_size).sum().item()
+        num_of_empty_columns = (
+            ((generated_tokens == self.pad_token_idx).sum(0) == b_size).sum().item()
+        )
         #   -> (1,)
-        postn_after_the_last_meaning_token = generated_tokens.shape[1] - num_of_empty_columns
+        postn_after_the_last_meaning_token = (
+            generated_tokens.shape[1] - num_of_empty_columns
+        )
         #   -> (1,)
         possible_draft_len = self.max_len - postn_after_the_last_meaning_token - 1
         #   -> (b_size, 1)
         beam_size = 1
 
-        while possible_draft_len >= 1 and postn_after_the_last_meaning_token <= self.max_len:
+        while (
+            possible_draft_len >= 1
+            and postn_after_the_last_meaning_token <= self.max_len
+        ):
             iters += 1
 
             if iters == 1:
                 beam_size = self.n_best
-                src_pad_mask = src_pad_mask.unsqueeze(1).repeat(1, self.n_best, 1).flatten(end_dim=1)
+                src_pad_mask = (
+                    src_pad_mask.unsqueeze(1)
+                    .repeat(1, self.n_best, 1)
+                    .flatten(end_dim=1)
+                )
                 # (b_size, src_len) -> (b_size * bm_sz, src_len)
-                memory = memory.unsqueeze(1).repeat(1, self.n_best, 1, 1).flatten(end_dim=1)
+                memory = (
+                    memory.unsqueeze(1).repeat(1, self.n_best, 1, 1).flatten(end_dim=1)
+                )
                 # (b_size, src_len, emb_dim) -> (b_size * bm_sz, src_len, emb_dim)
 
             draft_len = min(possible_draft_len, draft_len)
-            draft_lib = draft_lib[:, :, :draft_len + 1]  # we use the drafts without the first token
+            draft_lib = draft_lib[
+                :, :, : draft_len + 1
+            ]  # we use the drafts without the first token
             n_candidates, curr_len = generated_tokens.size()
 
             pads_num = (generated_tokens == self.pad_token_idx).sum(-1)
             # -> (n_candidates)
             draft_place_len = draft_len + 1 - num_of_empty_columns
             if draft_place_len > 0:
-                draft_place = torch.full((n_candidates, draft_place_len), self.pad_token_idx, device=src.device)
+                draft_place = torch.full(
+                    (n_candidates, draft_place_len),
+                    self.pad_token_idx,
+                    device=src.device,
+                )
                 generated_tokens = torch.cat((generated_tokens, draft_place), dim=-1)
             # -> (n_candidates, drafted_len)
             ############################################################################################################
             # Choose drafts from the draft library starting from the last meaning tokens of the given sequence
             inds_of_last_tokens = (generated_tokens != self.pad_token_idx).sum(-1) - 1
             # -> (n_candidates)
-            last_tokens = torch.gather(generated_tokens, dim=1, index=inds_of_last_tokens.unsqueeze(-1))
+            last_tokens = torch.gather(
+                generated_tokens, dim=1, index=inds_of_last_tokens.unsqueeze(-1)
+            )
             # -> (n_candidates, 1)
-            last_tokens = last_tokens.reshape(b_size, beam_size, 1).unsqueeze(-1).repeat(1, 1, 1, n_drafts)
+            last_tokens = (
+                last_tokens.reshape(b_size, beam_size, 1)
+                .unsqueeze(-1)
+                .repeat(1, 1, 1, n_drafts)
+            )
             # -> (b_size, bm_sz, 1, n_drafts)
             # vocab_tokens_bool: (b_sz, vocab_size, n_drafts)
-            vocab_tokens_bool = vocab_tokens_bool_lib.unsqueeze(1).repeat(1, beam_size, 1, 1)
+            vocab_tokens_bool = vocab_tokens_bool_lib.unsqueeze(1).repeat(
+                1, beam_size, 1, 1
+            )
             # -> (b_sz, bm_sz, vocab_size, n_drafts)
 
             # library_bool marks suitable drafts from the draft library as True for the given sequence. The draft is
@@ -670,7 +711,9 @@ class TranslationInferenceBeamSearchSpeculative:
             # -> (b_size, bm_sz, n_drafts)
             num_of_drafts_for_each_in_batch_and_beam = library_bool.sum(-1)
             # -> (b_size, bm_sz)
-            num_of_drafts_for_each_candidate = num_of_drafts_for_each_in_batch_and_beam.reshape(-1)
+            num_of_drafts_for_each_candidate = (
+                num_of_drafts_for_each_in_batch_and_beam.reshape(-1)
+            )
             # -> (n_candidates)
             batch_idx, beam_idx, draft_idx = torch.nonzero(library_bool, as_tuple=True)
             # -> (n),(n),(n)
@@ -684,38 +727,61 @@ class TranslationInferenceBeamSearchSpeculative:
             # (b_sz, n_drafts, draft_len) -> (n, draft_len)
             pad_place_bool = generated_tokens == self.pad_token_idx
             # -> (n_candidates, drafted_len)
-            draft_place_bool = torch.logical_and(pad_place_bool,
-                                                 pad_place_bool.cumsum(-1) <= draft_len)
+            draft_place_bool = torch.logical_and(
+                pad_place_bool, pad_place_bool.cumsum(-1) <= draft_len
+            )
             # -> (n_candidates, drafted_len)
-            draft_place_bool_idx_n = draft_place_bool[candidate_idx][:, :generated_tokens.shape[1]]
+            draft_place_bool_idx_n = draft_place_bool[candidate_idx][
+                :, : generated_tokens.shape[1]
+            ]
             # -> (n_candidates, drafted_len)
             generated_tokens_n[draft_place_bool_idx_n] = drafts_n.reshape(-1)
             # -> (n, drafted_len)
             ##########################################################################################################
             self.model_input_lines_num += generated_tokens_n.shape[0]
             self.model_calls_num += 1
-            pred_logits_n = self.model.decode_tgt(generated_tokens_n,
-                                                  memory[candidate_idx],
-                                                  memory_pad_mask=src_pad_mask[candidate_idx])
-            #  -> (n, drafted_len, vocab_size)
+            bool_idx_of_unfinished= ~(
+                (generated_tokens_n == self.eos_token_idx).sum(-1).bool()
+            )
+            # -> (n)
+            pred_logits_r = self.model.decode_tgt(
+                generated_tokens_n[bool_idx_of_unfinished],
+                memory[candidate_idx][bool_idx_of_unfinished],
+                memory_pad_mask=src_pad_mask[candidate_idx][bool_idx_of_unfinished],
+            )
+            #  -> (num_of_unfinished, drafted_len, vocab_size)
+            pred_logits_n = torch.full((generated_tokens_n.shape[0], draft_len + 1, self.vocab_size), 0., device=memory.device)
+        #   -> (n, draft_len + 1, vocab_size)
+            pred_logits_n[:,:,self.pad_token_idx] = 35.
+
+            self.b_sz += pred_logits_r.shape[0]
             vocab_size = pred_logits_n.shape[-1]
 
-            pred_logits_n = pred_logits_n[
-                torch.logical_or(draft_place_bool_idx_n, torch.roll(draft_place_bool_idx_n, -1, 1))].reshape(
-                -1, draft_len + 1, vocab_size)
-            #  -> (n, draft_len + 1, vocab_size)
-
-            masked_probs_n = mask_with_num_logits_according_nucleus(pred_logits_n, nucleus=0.9975,
-                                                                    max_num_of_unmasked_positions=self.n_best,
-                                                                    num="-inf").softmax(-1)
+            pred_logits_r = pred_logits_r[
+                torch.logical_or(
+                    draft_place_bool_idx_n[bool_idx_of_unfinished], torch.roll(draft_place_bool_idx_n[bool_idx_of_unfinished], -1, 1)
+                )
+            ].reshape(-1, draft_len + 1, vocab_size)
+            #  -> (num_of_unfinished, draft_len + 1, vocab_size)
+            pred_logits_n[bool_idx_of_unfinished] = pred_logits_r
+            masked_probs_n = mask_with_num_logits_according_nucleus(
+                pred_logits_n,
+                nucleus=0.9975,
+                max_num_of_unmasked_positions=self.n_best,
+                num="-inf",
+            ).softmax(-1)
             #   -> (n, draft_len + 1, vocab_size)
 
-            num_of_accepted_in_drafts_n = self.calculate_n_accepted_in_drafts(drafts_n.unsqueeze(0),
-                                                                              masked_probs_n.unsqueeze(0)).squeeze(0)
+            num_of_accepted_in_drafts_n = self.calculate_n_accepted_in_drafts(
+                drafts_n.unsqueeze(0), masked_probs_n.unsqueeze(0)
+            ).squeeze(0)
             #   -> (n,) # n is equal to sum(num_of_drafts_for_each_candidate)
-            n_accepted, top_inds_1d = topk_in_each_group(score_1d=num_of_accepted_in_drafts_n,
-                                                         length_of_each_group=num_of_drafts_for_each_candidate, k=1,
-                                                         pad=-1)
+            n_accepted, top_inds_1d = topk_in_each_group(
+                score_1d=num_of_accepted_in_drafts_n,
+                length_of_each_group=num_of_drafts_for_each_candidate,
+                k=1,
+                pad=-1,
+            )
             # -> (n_candidates, 1), (n_candidates,)
             pred_logits = pred_logits_n[top_inds_1d]
             # -> (n_candidates, draft_len + 1, vocab_size)
@@ -724,32 +790,54 @@ class TranslationInferenceBeamSearchSpeculative:
 
             # Sample all possible lines within the chosen drafts:
             # new_candidates have the initial tokens and the new ones
-            new_candidates, new_log_probs, num_of_new_seqs_for_each_in_batch, accepted_tokens_num = \
-                self.sample(generated_tokens, log_probs, pred_logits,
-                            chosen_drafts, b_size, draft_place_bool, n_accepted.squeeze(-1))
+            (
+                new_candidates,
+                new_log_probs,
+                num_of_new_seqs_for_each_in_batch,
+                accepted_tokens_num,
+            ) = self.sample(
+                generated_tokens,
+                log_probs,
+                pred_logits,
+                chosen_drafts,
+                b_size,
+                draft_place_bool,
+                n_accepted.squeeze(-1),
+            )
 
             ###########################################################################################################
-            new_log_probs, top_inds_1d = topk_in_each_group(score_1d=new_log_probs,
-                                                            length_of_each_group=num_of_new_seqs_for_each_in_batch,
-                                                            k=self.n_best, pad=-float("inf"))
+            new_log_probs, top_inds_1d = topk_in_each_group(
+                score_1d=new_log_probs,
+                length_of_each_group=num_of_new_seqs_for_each_in_batch,
+                k=self.n_best,
+                pad=-float("inf"),
+            )
             new_candidates = new_candidates[top_inds_1d]
             # -> (b_size * beam_size, drafted_len)
 
             accepted_tokens_num = accepted_tokens_num[top_inds_1d]
             # -> (b_size * beam_size,)
-
+            accepted_tokens_num = accepted_tokens_num[accepted_tokens_num >= 0]
             self.accepted_tokens_num += accepted_tokens_num.sum().item()
-            self.produced_non_pad_tokens += accepted_tokens_num.sum().item() + accepted_tokens_num.size(0)
+            self.produced_non_pad_tokens += (
+                accepted_tokens_num.sum().item() + accepted_tokens_num.size(0)
+            )
 
-            if (new_candidates == self.eos_token_idx).sum(-1).bool().sum() == b_size * self.n_best:
+            if (new_candidates == self.eos_token_idx).sum(
+                -1
+            ).bool().sum() == b_size * self.n_best:
                 break
             generated_tokens = new_candidates
             log_probs = new_log_probs.reshape(b_size * self.n_best, 1)
             # -> (b_size * beam_size, 1)
 
-            num_of_empty_columns = torch.min((generated_tokens == self.pad_token_idx).sum(-1)).item()
+            num_of_empty_columns = torch.min(
+                (generated_tokens == self.pad_token_idx).sum(-1)
+            ).item()
             #   -> (1,)
-            postn_after_the_last_meaning_token = generated_tokens.shape[1] - num_of_empty_columns
+            postn_after_the_last_meaning_token = (
+                generated_tokens.shape[1] - num_of_empty_columns
+            )
             #   -> (1,)
             possible_draft_len = self.max_len - postn_after_the_last_meaning_token - 1
             #   -> (b_size, 1)
