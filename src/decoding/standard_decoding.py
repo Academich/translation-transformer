@@ -109,42 +109,60 @@ class TranslationInferenceBeamSearch:
                                                dim=-1, sorted=True)  # (bs, 1, beam_width), (bs, 1, beam_width)
         probabilities = probabilities.squeeze(1)  # (bs, beam_width)
         y = y.unsqueeze(1).repeat((1, 1, self.beam_size)).reshape(-1, 1)
-        # (beam_width * bs, 1)
+        # (bs * beam_width, 1)
 
-        next_chars = next_chars.reshape(-1, 1)  # (bs *beam_width, 1)
-        y = torch.cat((y, next_chars), axis=-1)  # (beam_width * bs, 2)
+        next_chars = next_chars.reshape(-1, 1)  # (bs * beam_width, 1)
+        y = torch.cat((y, next_chars), axis=-1)  # (bs * beam_width, 2)
 
-        src_bw = src.repeat((self.beam_size, 1, 1)).transpose(0, 1).flatten(end_dim=1)  # (b_w, examples, length)
-        # (examples, beam_width, length) # fin_X [[5,20],[5,20],[5,20],[2,31],[2,31],[2,31]]
-        # (b_w * examples, length)
+        src_bw = src.repeat((self.beam_size, 1, 1)).transpose(0, 1).flatten(end_dim=1)
+        # -> (bs * beam_width, src_len)
 
         src_pad_mask = (src_bw == self.model.src_pad_token_i).bool()
-        memory = self.model.encode_src(src_bw, src_pad_mask)    # -> (given_b_size, src_len, emb_dim)
+        memory = self.model.encode_src(src_bw, src_pad_mask)    # -> (bs, src_len, emb_dim)
 
         predictions = self.max_len - 1
 
+        logits_base = torch.full((bs * self.beam_size,  vocab_size), 0., device=src.device)
+        #   -> (b_s * n_drafts, vocab_size)
+
         for i in range(predictions - 1):
-            pred_logits = self.model.decode_tgt(y,
-                                    memory,
-                                    memory_pad_mask=src_pad_mask)
-            next_probabilities = torch.log(torch.softmax(pred_logits, dim=-1))[:, -1, :]  # (bs*b_w, vocab_size)
+
+            logits_base = logits_base * 0.
+            # We use artificial logits to avoid calculation of obvious pad predicting after eos
+            logits_base[:, self.model.src_pad_token_i] = 35.
+            # 35. will give about 100% probability for pad_token after softmax()
+
+            bool_idx_of_unfinished = ~((y == self.eos_token).sum(-1).bool())
+            # -> (bs * beam_width)
+
+            pred_logits = self.model.decode_tgt(y[bool_idx_of_unfinished],
+                                    memory[bool_idx_of_unfinished],
+                                    memory_pad_mask=src_pad_mask[bool_idx_of_unfinished])
+            # -> (num_of_unfinished_candidates, 2 + i, vocab_size)
+            pred_logits = pred_logits[:, -1, :]
+            # -> (num_of_unfinished_candidates, vocab_size)
+
+            logits_base[bool_idx_of_unfinished] = pred_logits
+            #   -> (bs * b_w, vocab_size)
+            next_probabilities = torch.log(torch.softmax(logits_base, dim=-1))
+            # (bs * b_w, vocab_size)
 
             self.model_calls_num += 1
             next_probabilities = next_probabilities.reshape(
-                (-1, self.beam_size, next_probabilities.shape[-1]))  # (examples, b_w, vocab_size)
+                (-1, self.beam_size, next_probabilities.shape[-1]))  # (bs, b_w, vocab_size)
 
             probabilities = probabilities.unsqueeze(-1) + next_probabilities
-            # (examples,b_w,1) + (examples,b_w,vocab_size) ->(examples,b_w,vocab_size)
+            # (bs, b_w, 1) + (bs, b_w, vocab_size) ->(bs, b_w, vocab_size)
 
-            probabilities = probabilities.flatten(start_dim=1)  # (examples,b_w * vocab_size)
+            probabilities = probabilities.flatten(start_dim=1)  # (bs, b_w * vocab_size)
             probabilities, idx = probabilities.topk(k=self.beam_size, axis=-1,
-                                                    sorted=True)  # (examples,b_w), (examples,b_w)
-            next_chars = torch.remainder(idx, vocab_size).flatten().unsqueeze(-1)  # (examples * b_w,1)
-            best_candidates = (idx / vocab_size).long()  # (examples,b_w)
+                                                    sorted=True)  # (bs, b_w), (bs, b_w)
+            next_chars = torch.remainder(idx, vocab_size).flatten().unsqueeze(-1)  # (bs * b_w, 1)
+            best_candidates = (idx / vocab_size).long()  # (bs, b_w)
             best_candidates += torch.arange(y.shape[0] // self.beam_size, device=src.device).unsqueeze(
                 -1) * self.beam_size  # (beam_width * bs, 1)
-            y = y[best_candidates].flatten(end_dim=-2)  # (beam_width * bs, 2+i)
-            y = torch.cat((y, next_chars), axis=1)  # (beam_width * bs, 2+i)
+            y = y[best_candidates].flatten(end_dim=-2)  # (beam_width * bs, 2 + i)
+            y = torch.cat((y, next_chars), axis=1)  # -> (beam_width * bs, 2 + i + 1)
             if (y == self.eos_token).sum(-1).bool().sum().item() == y.size()[0]:
                 break
         _, curr_len = y.size()
