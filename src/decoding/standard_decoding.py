@@ -81,6 +81,8 @@ class TranslationInferenceBeamSearch:
         self.model_calls_num = 0
         self.given_tokens = 0
 
+        self.b_sz = 0
+
     def __str__(self):
         return f"Beam search decoding (beam_size={self.beam_size}, max_len={self.max_len})"
 
@@ -98,6 +100,7 @@ class TranslationInferenceBeamSearch:
 
         # Decode for one step using decoder
         decoder_output = self.model(src, y)  # (bs, 1, dict_len)
+        self.b_sz += bs
         self.model_calls_num += 1
         self.given_tokens += (src != self.model.src_pad_token_i).bool().sum().item()
         logprob_decoder_output = torch.log(torch.softmax(decoder_output, dim=-1))
@@ -123,7 +126,7 @@ class TranslationInferenceBeamSearch:
         predictions = self.max_len - 1
 
         logits_base = torch.full((bs * self.beam_size,  vocab_size), 0., device=src.device)
-        #   -> (b_s * n_drafts, vocab_size)
+        #   -> (b_s * beam_size, vocab_size)
 
         for i in range(predictions - 1):
 
@@ -135,6 +138,7 @@ class TranslationInferenceBeamSearch:
             bool_idx_of_unfinished = ~((y == self.eos_token).sum(-1).bool())
             # -> (bs * beam_width)
 
+            self.b_sz += bool_idx_of_unfinished.sum().item()
             pred_logits = self.model.decode_tgt(y[bool_idx_of_unfinished],
                                     memory[bool_idx_of_unfinished],
                                     memory_pad_mask=src_pad_mask[bool_idx_of_unfinished])
